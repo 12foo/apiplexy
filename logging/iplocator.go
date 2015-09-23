@@ -2,27 +2,36 @@ package logging
 
 import (
 	"fmt"
-	"github.com/12foo/apiplexy"
-	g "github.com/oschwald/geoip2-golang"
 	"net"
 	"net/http"
 	"strings"
+	"sync"
+
+	"github.com/12foo/apiplexy"
+	g "github.com/oschwald/geoip2-golang"
 )
+
+type concurrentMap struct {
+	sync.RWMutex
+	m map[string]interface{}
+}
 
 //IPLocatorPlugin ..
 type IPLocatorPlugin struct {
-	pathToMmdbFile string                 //Path to the GeoIP2 File-Database
-	ipCache        map[string]interface{} //Caching of Locations to avoid slow fs access
+	pathToMmdbFile string        //Path to the GeoIP2 File-Database
+	ipCache        concurrentMap //Caching of Locations to avoid slow fs access
 }
 
 //PostUpstream ..
 func (l *IPLocatorPlugin) Log(req *http.Request, res *http.Response, ctx *apiplexy.APIContext) error {
 
 	ip, _, _ := net.SplitHostPort(req.RemoteAddr)
-
-	if val, ok := l.ipCache[ip]; ok {
+	l.ipCache.RLock()
+	ipLocation, inCache := l.ipCache.m[ip]
+	l.ipCache.RUnlock()
+	if inCache {
 		//Retrive Location from ipCache
-		ctx.Log["location"] = val
+		ctx.Log["location"] = ipLocation
 
 	} else {
 		//Retrive Location from File-Database
@@ -39,7 +48,9 @@ func (l *IPLocatorPlugin) Log(req *http.Request, res *http.Response, ctx *apiple
 		}
 
 		ctx.Log["Location"] = record.Location //Latitude, Longitude..
-		l.ipCache[ip] = record.Location       //Put Loction into ipCache
+		l.ipCache.Lock()
+		l.ipCache.m[ip] = record.Location //Put Loction into ipCache
+		l.ipCache.Unlock()
 	}
 
 	return nil
@@ -59,7 +70,7 @@ func (l *IPLocatorPlugin) Configure(config map[string]interface{}) error {
 	}
 	l.pathToMmdbFile = path
 	if config["ip_caching"].(bool) {
-		l.ipCache = make(map[string]interface{})
+		l.ipCache = concurrentMap{m: make(map[string]interface{})}
 	}
 	return nil
 }
