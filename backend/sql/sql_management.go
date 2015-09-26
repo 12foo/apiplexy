@@ -4,6 +4,9 @@ import (
 	gosql "database/sql"
 	"encoding/json"
 	"fmt"
+	"strings"
+	"time"
+
 	"github.com/12foo/apiplexy"
 	_ "github.com/denisenkom/go-mssqldb"
 	_ "github.com/go-sql-driver/mysql"
@@ -11,8 +14,6 @@ import (
 	_ "github.com/lib/pq"
 	_ "github.com/mattn/go-sqlite3"
 	"golang.org/x/crypto/bcrypt"
-	"strings"
-	"time"
 )
 
 type sqlDBKey struct {
@@ -61,7 +62,6 @@ func (u *sqlDBUser) toUser() *apiplexy.User {
 	cu := apiplexy.User{
 		Email:  u.Email,
 		Name:   u.Name,
-		Admin:  u.Admin,
 		Active: u.Active,
 	}
 	json.Unmarshal([]byte(u.Profile), &cu.Profile)
