@@ -8,6 +8,7 @@ import (
 	"github.com/garyburd/redigo/redis"
 	"github.com/gorilla/mux"
 	"net/http"
+	"strings"
 	"time"
 )
 
@@ -269,16 +270,21 @@ func (ap *apiplex) BuildPortalAPI(prefix string) (*mux.Router, error) {
 		return nil, err
 	}
 
-	r := mux.NewRouter().PathPrefix(prefix).Subrouter()
+	r := mux.NewRouter().PathPrefix(prefix).MatcherFunc(func(r *http.Request, rm *mux.RouteMatch) bool {
+		if r.Method == "GET" {
+			return true
+		}
+		return strings.HasPrefix(r.Header.Get("Content-Type"), "application/json")
+	}).Subrouter()
 
-	r.HandleFunc("/account", p.createUser).Methods("POST").Headers("Content-Type", "application/json")
+	r.HandleFunc("/account", p.createUser).Methods("POST")
 	r.HandleFunc("/account/activate/{key}", p.activateUser)
-	r.HandleFunc("/account/token", p.getToken).Methods("POST").Headers("Content-Type", "application/json")
-	r.HandleFunc("/account/update", p.auth(p.updateProfile)).Methods("POST").Headers("Content-Type", "application/json")
+	r.HandleFunc("/account/token", p.getToken).Methods("POST")
+	r.HandleFunc("/account/update", p.auth(p.updateProfile)).Methods("POST")
 	r.HandleFunc("/keys/types", p.auth(p.getKeyTypes))
 	r.HandleFunc("/keys", p.auth(p.getAllKeys)).Methods("GET")
-	r.HandleFunc("/keys", p.auth(p.createKey)).Methods("POST").Headers("Content-Type", "application/json")
-	r.HandleFunc("/keys/delete", p.auth(p.createKey)).Methods("POST").Headers("Content-Type", "application/json")
+	r.HandleFunc("/keys", p.auth(p.createKey)).Methods("POST")
+	r.HandleFunc("/keys/delete", p.auth(p.createKey)).Methods("POST")
 
 	return r, nil
 }

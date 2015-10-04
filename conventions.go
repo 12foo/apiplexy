@@ -74,7 +74,7 @@ type ApiplexConfig struct {
 type User struct {
 	Email   string                 `json:"email"`
 	Name    string                 `json:"name"`
-	Active  bool                   `json:"-"`
+	Active  bool                   `json:"active"`
 	Profile map[string]interface{} `json:"profile,omitempty"`
 }
 

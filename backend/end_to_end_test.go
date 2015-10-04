@@ -37,7 +37,7 @@ serve:
   api: /
   upstreams:
   - http://your-actual-api:8000/
-  portal_api: /portal/api/
+  portal_api: /portal-api/
   signing_key: test-signing-key
 plugins:
   auth:
@@ -125,14 +125,14 @@ func TestPortalAPI(t *testing.T) {
 	var token string
 
 	Convey("User can't access protected paths without authentication", t, func() {
-		req, _ := http.NewRequest("GET", "/portal/api/keys/types", nil)
+		req, _ := http.NewRequest("GET", "/portal-api/keys/types", nil)
 		res := httptest.NewRecorder()
 		ap.ServeHTTP(res, req)
 		So(res, shouldHaveStatus, 403)
 	})
 
 	Convey("Creating user", t, func() {
-		req, _ := http.NewRequest("POST", "/portal/api/account", toBody(map[string]interface{}{
+		req, _ := http.NewRequest("POST", "/portal-api/account", toBody(map[string]interface{}{
 			"email":    "test@user.com",
 			"name":     "Test User",
 			"password": "test-password",
@@ -145,7 +145,7 @@ func TestPortalAPI(t *testing.T) {
 	})
 
 	Convey("Un-activated user can't log in", t, func() {
-		req, _ := http.NewRequest("POST", "/portal/api/account/token", toBody(map[string]interface{}{
+		req, _ := http.NewRequest("POST", "/portal-api/account/token", toBody(map[string]interface{}{
 			"email":    "test@user.com",
 			"password": "test-password",
 		}))
@@ -160,7 +160,7 @@ func TestPortalAPI(t *testing.T) {
 		code, _ := redis.String(possibleKeys[0], nil)
 		code = strings.TrimPrefix(code, "activation:")
 		So(code, ShouldNotEqual, "")
-		req, _ := http.NewRequest("GET", "/portal/api/account/activate/"+code, nil)
+		req, _ := http.NewRequest("GET", "/portal-api/account/activate/"+code, nil)
 		res := httptest.NewRecorder()
 		ap.ServeHTTP(res, req)
 		So(res, shouldHaveStatus, 302)
@@ -168,7 +168,7 @@ func TestPortalAPI(t *testing.T) {
 	})
 
 	Convey("Activated user can log in", t, func() {
-		req, _ := http.NewRequest("POST", "/portal/api/account/token", toBody(map[string]interface{}{
+		req, _ := http.NewRequest("POST", "/portal-api/account/token", toBody(map[string]interface{}{
 			"email":    "test@user.com",
 			"password": "test-password",
 		}))
@@ -187,7 +187,7 @@ func TestPortalAPI(t *testing.T) {
 	var ktype string
 
 	Convey("Valid user can access protected paths", t, func() {
-		req, _ := http.NewRequest("GET", "/portal/api/keys/types", nil)
+		req, _ := http.NewRequest("GET", "/portal-api/keys/types", nil)
 		req.Header.Set("Authorization", "Bearer "+token)
 		res := httptest.NewRecorder()
 		ap.ServeHTTP(res, req)
@@ -199,7 +199,7 @@ func TestPortalAPI(t *testing.T) {
 	})
 
 	Convey("User should have 0 keys", t, func() {
-		req, _ := http.NewRequest("GET", "/portal/api/keys", nil)
+		req, _ := http.NewRequest("GET", "/portal-api/keys", nil)
 		req.Header.Set("Authorization", "Bearer "+token)
 		res := httptest.NewRecorder()
 		ap.ServeHTTP(res, req)
@@ -210,7 +210,7 @@ func TestPortalAPI(t *testing.T) {
 	})
 
 	Convey("Create a key", t, func() {
-		req, _ := http.NewRequest("POST", "/portal/api/keys", toBody(map[string]interface{}{
+		req, _ := http.NewRequest("POST", "/portal-api/keys", toBody(map[string]interface{}{
 			"type":  ktype,
 			"realm": "test-realm",
 		}))
@@ -222,7 +222,7 @@ func TestPortalAPI(t *testing.T) {
 	})
 
 	Convey("User should have 1 key", t, func() {
-		req, _ := http.NewRequest("GET", "/portal/api/keys", nil)
+		req, _ := http.NewRequest("GET", "/portal-api/keys", nil)
 		req.Header.Set("Authorization", "Bearer "+token)
 		res := httptest.NewRecorder()
 		ap.ServeHTTP(res, req)
