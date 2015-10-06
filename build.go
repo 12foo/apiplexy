@@ -80,6 +80,7 @@ func ExampleConfiguration(pluginNames []string) (*ApiplexConfig, error) {
 		Email: apiplexConfigEmail{
 			AlertsTo:       []string{"your@email.com"},
 			AlertsCooldown: 30,
+			LinkBase:       "http://localhost:5000/portal-api/",
 			From:           "Your API <noreply@your-api.com>",
 			Server:         "localhost",
 			Port:           25,
@@ -99,8 +100,7 @@ func ExampleConfiguration(pluginNames []string) (*ApiplexConfig, error) {
 			Port:       5000,
 			API:        "/",
 			Upstreams:  []string{"http://your-actual-api:8000/"},
-			PortalAPI:  "/portal/api/",
-			Portal:     "/portal/",
+			PortalAPI:  "/portal-api/",
 			SigningKey: uniuri.NewLen(64),
 		},
 	}

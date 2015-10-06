@@ -7,6 +7,7 @@ import (
 	"github.com/dgrijalva/jwt-go"
 	"github.com/garyburd/redigo/redis"
 	"github.com/gorilla/mux"
+	"gopkg.in/gomail.v2"
 	"net/http"
 	"strings"
 	"time"
@@ -14,6 +15,7 @@ import (
 
 type portalAPI struct {
 	signingKey []byte
+	linkBase   string
 	m          ManagementBackendPlugin
 	a          *apiplex
 	keytypes   map[string]KeyType
@@ -66,7 +68,19 @@ func (p *portalAPI) createUser(res http.ResponseWriter, req *http.Request) {
 		r := p.a.redis.Get()
 		jsonAct, _ := json.Marshal(&act)
 		r.Do("SETEX", "activation:"+code, (24 * time.Hour).Seconds(), jsonAct)
-		// TODO send activation code email
+
+		m := gomail.NewMessage()
+		m.SetHeader("From", p.a.email.From)
+		m.SetHeader("To", n.Email)
+		m.SetHeader("Subject", "Activate your account")
+		m.SetBody("text/plain", fmt.Sprintf(`Hi %s,
+
+		please activate your developer account by clicking on this link:
+		%s/account/activate/%s
+		`, u.Name, p.a.email.LinkBase, code))
+
+		d := gomail.NewPlainDialer(p.a.email.Server, p.a.email.Port, p.a.email.User, p.a.email.Password)
+		d.DialAndSend(m)
 	}
 	finish(res, &u)
 }
