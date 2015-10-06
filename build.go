@@ -28,6 +28,8 @@ type APIUpstream struct {
 
 type apiplex struct {
 	signingKey    string
+	email         apiplexConfigEmail
+	lastAlert     *time.Time
 	upstreams     []APIUpstream
 	apipath       string
 	authCacheMins int
@@ -74,6 +76,13 @@ func ExampleConfiguration(pluginNames []string) (*ApiplexConfig, error) {
 			Host: "127.0.0.1",
 			Port: 6379,
 			DB:   0,
+		},
+		Email: apiplexConfigEmail{
+			AlertsTo:       []string{"your@email.com"},
+			AlertsCooldown: 30,
+			From:           "Your API <noreply@your-api.com>",
+			Server:         "localhost",
+			Port:           25,
 		},
 		Quotas: map[string]apiplexQuota{
 			"default": apiplexQuota{
@@ -201,6 +210,8 @@ func buildApiplex(config ApiplexConfig) (*apiplex, error) {
 		apipath:       ensureFinalSlash(config.Serve.API),
 		authCacheMins: 10,
 		signingKey:    config.Serve.SigningKey,
+		email:         config.Email,
+		lastAlert:     nil,
 	}
 
 	if _, ok := config.Quotas["default"]; !ok {

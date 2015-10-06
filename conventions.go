@@ -54,6 +54,16 @@ type apiplexConfigPlugins struct {
 	Logging      []apiplexPluginConfig `yaml:",omitempty" json:",omitempty"`
 }
 
+type apiplexConfigEmail struct {
+	AlertsTo       []string `yaml:alerts_to`
+	AlertsCooldown int      `yaml:alerts_cooldown`
+	From           string
+	Server         string
+	Port           int
+	User           string
+	Password       string
+}
+
 type apiplexQuota struct {
 	Minutes int
 	MaxIP   int `yaml:"max_ip,omitempty"`
@@ -62,6 +72,7 @@ type apiplexQuota struct {
 
 type ApiplexConfig struct {
 	Redis   apiplexConfigRedis
+	Email   apiplexConfigEmail
 	Quotas  map[string]apiplexQuota
 	Serve   apiplexConfigServe
 	Plugins apiplexConfigPlugins

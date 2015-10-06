@@ -5,11 +5,13 @@ import (
 	"encoding/json"
 	"fmt"
 	"github.com/garyburd/redigo/redis"
+	"gopkg.in/gomail.v2"
 	"io/ioutil"
 	"math/rand"
 	"net"
 	"net/http"
 	"strings"
+	"time"
 )
 
 // Hop-by-hop headers. These are removed when sent to the backend.
@@ -40,7 +42,18 @@ func (ap *apiplex) error(status int, err error, res http.ResponseWriter) {
 		jsonError, _ := json.Marshal(&processingError{Error: err.Error()})
 		res.Write(jsonError)
 	default:
-		// TODO analyze error and maybe report
+		if ap.lastAlert == nil || time.Since(*ap.lastAlert) > time.Duration(ap.email.AlertsCooldown)*time.Minute {
+			now := time.Now()
+			ap.lastAlert = &now
+			m := gomail.NewMessage()
+			m.SetHeader("From", ap.email.From)
+			m.SetHeader("To", ap.email.AlertsTo...)
+			m.SetHeader("Subject", "[API Error] Error on API gateway")
+			m.SetBody("text/plain; charset=UTF-8", err.Error())
+			d := gomail.NewPlainDialer(ap.email.Server, ap.email.Port, ap.email.User, ap.email.Password)
+			d.DialAndSend(m)
+		}
+
 		res.WriteHeader(status)
 		jsonError, _ := json.Marshal(&processingError{Error: err.Error()})
 		res.Write(jsonError)
@@ -269,6 +282,64 @@ func (ap *apiplex) HandleAPI(res http.ResponseWriter, req *http.Request) {
 	// TODO client abort early, better response processing
 	body, _ := ioutil.ReadAll(urs.Body)
 	urs.Body.Close()
+
+	// if something seriously went wrong on the backend, report
+	if urs.StatusCode >= 500 {
+		if ap.lastAlert == nil || time.Since(*ap.lastAlert) > time.Duration(ap.email.AlertsCooldown)*time.Minute {
+			now := time.Now()
+			ap.lastAlert = &now
+			m := gomail.NewMessage()
+			m.SetHeader("From", ap.email.From)
+			m.SetHeader("To", ap.email.AlertsTo...)
+			m.SetHeader("Subject", "[API Error] Upstream server error")
+
+			type detail struct {
+				Item  string
+				Value string
+			}
+			details := []detail{
+				{"Code", fmt.Sprintf("%d - %s", urs.StatusCode, urs.Status)},
+				{"Backend Server", ctx.Upstream.Address.String()},
+				{"Method", req.Method},
+				{"Request URI", req.RequestURI},
+			}
+			if !ctx.Keyless {
+				details = append(details, detail{"Key ID", ctx.Key.ID})
+			}
+			if req.Method == "POST" {
+				b, _ := ioutil.ReadAll(req.Body)
+				details = append(details, detail{"Request Body", string(b)})
+			}
+
+			ebody := ""
+			ebody = ebody + fmt.Sprintf("<h2>%s</h2>", "Upstream server error")
+			ebody = ebody + "<table>"
+			for _, d := range details {
+				ebody = ebody + fmt.Sprintf("<tr><th>%s</th><td>%s</td></tr>", d.Item, d.Value)
+			}
+			ebody = ebody + "</table><hr>"
+
+			if strings.HasPrefix(urs.Header.Get("Content-Type"), "text/html") {
+				m.SetBody("text/html", ebody+string(body))
+			} else {
+				m.SetBody("text/html", ebody+"<pre>"+string(body)+"</pre>")
+			}
+
+			d := gomail.NewPlainDialer(ap.email.Server, ap.email.Port, ap.email.User, ap.email.Password)
+			d.DialAndSend(m)
+		}
+
+		msg := map[string]interface{}{
+			"error":   "Internal API error",
+			"details": "Sorry, something went wrong on the API server. The error has been reported to technical staff.",
+			"code":    urs.StatusCode,
+		}
+		res.WriteHeader(urs.StatusCode)
+		r, _ := json.Marshal(msg)
+		res.Write(r)
+		return
+	}
+
 	res.WriteHeader(urs.StatusCode)
 	res.Write(body)
 
