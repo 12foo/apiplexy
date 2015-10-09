@@ -43,6 +43,7 @@ type apiplex struct {
 	preupstream   []PreUpstreamPlugin
 	postupstream  []PostUpstreamPlugin
 	logging       []LoggingPlugin
+	startables    []LifecyclePlugin
 }
 
 // RegisterPlugin makes your plugin available to apiplexy. You should probably
@@ -157,7 +158,7 @@ func ensureDefaults(target map[string]interface{}, defaults map[string]interface
 // A little black magic here: buildPlugins uses reflection to reify and configure
 // actual working plugins from zero-value references. The plugins are also reflect-
 // typechecked so we don't run into nasty surprises later.
-func buildPlugins(plugins []apiplexPluginConfig, lifecyclePluginType reflect.Type) ([]interface{}, error) {
+func buildPlugins(plugins []apiplexPluginConfig, pluginType reflect.Type, startables []LifecyclePlugin) ([]interface{}, error) {
 	built := make([]interface{}, len(plugins))
 	for i, config := range plugins {
 		ptype, ok := registeredPlugins[config.Plugin]
@@ -166,8 +167,8 @@ func buildPlugins(plugins []apiplexPluginConfig, lifecyclePluginType reflect.Typ
 		}
 		pt := reflect.New(ptype.pluginType)
 
-		if ptype.pluginType.Implements(lifecyclePluginType) {
-			return nil, fmt.Errorf("Plugin '%s' (%s) cannot be loaded as %s.", config.Plugin, ptype.pluginType.Name(), lifecyclePluginType.Name())
+		if !pt.Type().Implements(pluginType) {
+			return nil, fmt.Errorf("Plugin '%s' (%s) cannot be loaded as %s.", config.Plugin, ptype.pluginType.Name(), pluginType.Name())
 		}
 
 		defConfig := pt.MethodByName("DefaultConfig").Call([]reflect.Value{})[0].Interface().(map[string]interface{})
@@ -179,7 +180,14 @@ func buildPlugins(plugins []apiplexPluginConfig, lifecyclePluginType reflect.Typ
 			err := maybeErr.(error)
 			return nil, fmt.Errorf("While configuring '%s': %s", config.Plugin, err.Error())
 		}
-		built[i] = pt.Interface()
+
+		st := pt.Interface()
+		built[i] = st
+
+		if pt.Type().Implements(reflect.TypeOf((*LifecyclePlugin)(nil)).Elem()) {
+			lt := st.(LifecyclePlugin)
+			startables = append(startables, lt)
+		}
 	}
 	return built, nil
 }
@@ -227,8 +235,12 @@ func buildApiplex(config ApiplexConfig) (*apiplex, error) {
 	}
 	ap.quotas = config.Quotas
 
+	// this slice will contain all plugins that implement LifecyclePlugin after all plugins
+	// are configured
+	ap.startables = []LifecyclePlugin{}
+
 	// auth plugins
-	auth, err := buildPlugins(config.Plugins.Auth, reflect.TypeOf((*AuthPlugin)(nil)).Elem())
+	auth, err := buildPlugins(config.Plugins.Auth, reflect.TypeOf((*AuthPlugin)(nil)).Elem(), ap.startables)
 	if err != nil {
 		return nil, err
 	}
@@ -239,7 +251,7 @@ func buildApiplex(config ApiplexConfig) (*apiplex, error) {
 	}
 
 	// backend plugins
-	backend, err := buildPlugins(config.Plugins.Backend, reflect.TypeOf((*BackendPlugin)(nil)).Elem())
+	backend, err := buildPlugins(config.Plugins.Backend, reflect.TypeOf((*BackendPlugin)(nil)).Elem(), ap.startables)
 	if err != nil {
 		return nil, err
 	}
@@ -263,7 +275,7 @@ func buildApiplex(config ApiplexConfig) (*apiplex, error) {
 	}
 
 	// postauth plugins
-	postauth, err := buildPlugins(config.Plugins.PostAuth, reflect.TypeOf((*PostAuthPlugin)(nil)).Elem())
+	postauth, err := buildPlugins(config.Plugins.PostAuth, reflect.TypeOf((*PostAuthPlugin)(nil)).Elem(), ap.startables)
 	if err != nil {
 		return nil, err
 	}
@@ -274,7 +286,7 @@ func buildApiplex(config ApiplexConfig) (*apiplex, error) {
 	}
 
 	// preupstream plugins
-	preupstream, err := buildPlugins(config.Plugins.PreUpstream, reflect.TypeOf((*PreUpstreamPlugin)(nil)).Elem())
+	preupstream, err := buildPlugins(config.Plugins.PreUpstream, reflect.TypeOf((*PreUpstreamPlugin)(nil)).Elem(), ap.startables)
 	if err != nil {
 		return nil, err
 	}
@@ -285,7 +297,7 @@ func buildApiplex(config ApiplexConfig) (*apiplex, error) {
 	}
 
 	// postupstream plugins
-	postupstream, err := buildPlugins(config.Plugins.PostUpstream, reflect.TypeOf((*PostUpstreamPlugin)(nil)).Elem())
+	postupstream, err := buildPlugins(config.Plugins.PostUpstream, reflect.TypeOf((*PostUpstreamPlugin)(nil)).Elem(), ap.startables)
 	if err != nil {
 		return nil, err
 	}
@@ -296,7 +308,7 @@ func buildApiplex(config ApiplexConfig) (*apiplex, error) {
 	}
 
 	// logging plugins
-	logging, err := buildPlugins(config.Plugins.Logging, reflect.TypeOf((*LoggingPlugin)(nil)).Elem())
+	logging, err := buildPlugins(config.Plugins.Logging, reflect.TypeOf((*LoggingPlugin)(nil)).Elem(), ap.startables)
 	if err != nil {
 		return nil, err
 	}
@@ -342,7 +354,23 @@ func buildApiplex(config ApiplexConfig) (*apiplex, error) {
 		log.Fatalf("Couldn't connect to Redis. %s", err.Error())
 	}
 
+	for _, st := range ap.startables {
+		err := st.Start(ap.reportError)
+		if err != nil {
+			log.Fatalf("Error starting plugin. %s", err.Error())
+		}
+	}
+
 	return &ap, nil
+}
+
+func (ap *apiplex) Shutdown() {
+	for _, st := range ap.startables {
+		err := st.Stop()
+		if err != nil {
+			log.Printf("Error starting plugin. %s\n", err.Error())
+		}
+	}
 }
 
 func New(config ApiplexConfig) (*http.ServeMux, error) {

@@ -141,9 +141,21 @@ type KeyType struct {
 // The builder ensures that before any configuration is passed to your
 // Configure method, it has all the keys in your DefaultConfig, with their
 // values type-matching the default values.
-type ApiplexPlugin interface {
+type Plugin interface {
 	Configure(config map[string]interface{}) error
 	DefaultConfig() map[string]interface{}
+}
+
+// Plugins that implement LifecyclePlugin will be started and stopped in an
+// orderly fashion by the API gateway. Start() is called after Configure()
+// and receives a function that can be used to report errors during the
+// plugin's runtime. This interface is useful for plugins that keep their
+// own goroutines running in the background.
+//
+// Stop() is called when the API gateway shuts down.
+type LifecyclePlugin interface {
+	Start(report func(error)) error
+	Stop() error
 }
 
 // An AuthPlugin takes responsibility for one or several authentication methods
@@ -162,7 +174,7 @@ type ApiplexPlugin interface {
 // would verify the key by checking the request signature against the secret key
 // retrieved from the backend.
 type AuthPlugin interface {
-	ApiplexPlugin
+	Plugin
 	AvailableTypes() []KeyType
 	Generate(keyType string) (key Key, err error)
 	Detect(req *http.Request, ctx *APIContext) (maybeKey string, keyType string, authCtx map[string]interface{}, err error)
@@ -173,7 +185,7 @@ type AuthPlugin interface {
 // It can not delete or manage these keys, and is used exclusively in request
 // authentication.
 type BackendPlugin interface {
-	ApiplexPlugin
+	Plugin
 	GetKey(keyID string, keyType string) (*Key, error)
 }
 
@@ -215,7 +227,7 @@ type ManagementBackendPlugin interface {
 //
 //  ctx.Cost = 3
 type PostAuthPlugin interface {
-	ApiplexPlugin
+	Plugin
 	PostAuth(req *http.Request, ctx *APIContext) error
 }
 
@@ -224,7 +236,7 @@ type PostAuthPlugin interface {
 // point, it's important that you avoid aborting the request unless there's a critical
 // reason. Prefer a PostAuthPlugin for likely aborts.
 type PreUpstreamPlugin interface {
-	ApiplexPlugin
+	Plugin
 	PreUpstream(req *http.Request, ctx *APIContext) error
 }
 
@@ -232,7 +244,7 @@ type PreUpstreamPlugin interface {
 // receives an additional "res" parameter. This is the response returned by upstream.
 // You can modify the response body here.
 type PostUpstreamPlugin interface {
-	ApiplexPlugin
+	Plugin
 	PostUpstream(req *http.Request, res *http.Response, ctx *APIContext) error
 }
 
@@ -243,6 +255,6 @@ type PostUpstreamPlugin interface {
 // As a convention, logging plugins MUST log/store all entries in the ctx.Log map. This
 // map is, also by convention, always JSON-serializable.
 type LoggingPlugin interface {
-	ApiplexPlugin
+	Plugin
 	Log(req *http.Request, res *http.Response, ctx *APIContext) error
 }

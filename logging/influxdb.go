@@ -10,9 +10,10 @@ import (
 )
 
 type InfluxDBLoggingPlugin struct {
-	url         string
-	measurement string
-	lines       chan string
+	url           string
+	measurement   string
+	lines         chan string
+	flushInterval time.Duration
 }
 
 func (ix *InfluxDBLoggingPlugin) Log(req *http.Request, res *http.Response, ctx *apiplexy.APIContext) error {
@@ -51,8 +52,13 @@ func (ix *InfluxDBLoggingPlugin) Configure(config map[string]interface{}) error 
 	ix.url = "http://" + config["server"].(string) + "/write?db=" + config["database"].(string)
 	ix.measurement = config["measurement"].(string)
 	ix.lines = make(chan string, 100)
-	flush := time.Tick(time.Duration(config["flush_interval"].(int)) * time.Second)
+	ix.flushInterval = time.Duration(config["flush_interval"].(int)) * time.Second
 
+	return nil
+}
+
+func (ix *InfluxDBLoggingPlugin) Start(report func(error)) error {
+	flush := time.Tick(ix.flushInterval)
 	go func() {
 		lines := []string{}
 
@@ -60,18 +66,24 @@ func (ix *InfluxDBLoggingPlugin) Configure(config map[string]interface{}) error 
 		case line := <-ix.lines:
 			lines = append(lines, line)
 		case _ = <-flush:
-			http.Post(ix.url, "text/plain", strings.NewReader(strings.Join(lines, "\n")))
-			// TODO process error / allow error reporting from inside plugin goroutines
-			// influxdb success response code is HTTP 204
+			res, err := http.Post(ix.url, "text/plain", strings.NewReader(strings.Join(lines, "\n")))
+			if err != nil {
+				report(err)
+			}
+			if res.StatusCode != 204 {
+				report(fmt.Errorf("Error logging to InfluxDB. HTTP status code: %d", res.StatusCode))
+			}
 			lines = nil
 		}
 	}()
+	return nil
+}
 
+func (ix *InfluxDBLoggingPlugin) Stop() error {
 	return nil
 }
 
 func init() {
-	// _ = apiplexy.LoggingPlugin(&InfluxDBLoggingPlugin{})
 	apiplexy.RegisterPlugin(
 		"influxdb",
 		"Log requests to InfluxDB.",

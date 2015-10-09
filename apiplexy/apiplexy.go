@@ -95,6 +95,7 @@ func start(c *cli.Context) {
 		Handler: ap,
 	}
 	fmt.Printf("Running server on port %d.\n", config.Serve.Port)
+	// TODO graceful shutdown including plugins
 	server.ListenAndServe()
 }
 

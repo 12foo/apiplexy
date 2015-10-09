@@ -31,6 +31,20 @@ type processingError struct {
 	Error string `json:"error"`
 }
 
+func (ap *apiplex) reportError(err error) {
+	if ap.lastAlert == nil || time.Since(*ap.lastAlert) > time.Duration(ap.email.AlertsCooldown)*time.Minute {
+		now := time.Now()
+		ap.lastAlert = &now
+		m := gomail.NewMessage()
+		m.SetHeader("From", ap.email.From)
+		m.SetHeader("To", ap.email.AlertsTo...)
+		m.SetHeader("Subject", "[API Error] Error on API gateway")
+		m.SetBody("text/plain; charset=UTF-8", err.Error())
+		d := gomail.NewPlainDialer(ap.email.Server, ap.email.Port, ap.email.User, ap.email.Password)
+		d.DialAndSend(m)
+	}
+}
+
 // Shortcut function to end requests prematurely. If called with an AbortRequest, will end request
 // nicely with an error message to the user. If called with any other error type, will throw a 500
 // and report the error through reporting.
@@ -42,18 +56,7 @@ func (ap *apiplex) error(status int, err error, res http.ResponseWriter) {
 		jsonError, _ := json.Marshal(&processingError{Error: err.Error()})
 		res.Write(jsonError)
 	default:
-		if ap.lastAlert == nil || time.Since(*ap.lastAlert) > time.Duration(ap.email.AlertsCooldown)*time.Minute {
-			now := time.Now()
-			ap.lastAlert = &now
-			m := gomail.NewMessage()
-			m.SetHeader("From", ap.email.From)
-			m.SetHeader("To", ap.email.AlertsTo...)
-			m.SetHeader("Subject", "[API Error] Error on API gateway")
-			m.SetBody("text/plain; charset=UTF-8", err.Error())
-			d := gomail.NewPlainDialer(ap.email.Server, ap.email.Port, ap.email.User, ap.email.Password)
-			d.DialAndSend(m)
-		}
-
+		ap.reportError(err)
 		res.WriteHeader(status)
 		jsonError, _ := json.Marshal(&processingError{Error: err.Error()})
 		res.Write(jsonError)
