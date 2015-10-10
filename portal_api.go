@@ -24,7 +24,7 @@ type portalAPI struct {
 
 type activationData struct {
 	Email string `json:"email"`
-	After string `json:"after"`
+	Link  string `json:"link"`
 }
 
 func abort(res http.ResponseWriter, code int, message string, args ...interface{}) {
@@ -50,10 +50,10 @@ func (p *portalAPI) createUser(res http.ResponseWriter, req *http.Request) {
 		Name     string
 		Password string
 		Profile  map[string]interface{}
-		After    string
+		Link     string
 	}{}
-	if decoder.Decode(&n) != nil || n.Email == "" || n.Password == "" || n.Name == "" {
-		abort(res, 400, "Request a new account by supplying your email, name and password.")
+	if decoder.Decode(&n) != nil || n.Email == "" || n.Password == "" || n.Name == "" || n.Link == "" {
+		abort(res, 400, "Request a new account by supplying email, name, password and a template for an activation link.")
 		return
 	}
 	u := User{Name: n.Name, Email: n.Email, Active: false, Profile: n.Profile}
@@ -64,10 +64,9 @@ func (p *portalAPI) createUser(res http.ResponseWriter, req *http.Request) {
 	}
 	if !u.Active {
 		code := uniuri.NewLen(48)
-		act := activationData{Email: n.Email, After: n.After}
+		link := strings.Replace(n.Link, "CODE", code, 1)
 		r := p.a.redis.Get()
-		jsonAct, _ := json.Marshal(&act)
-		r.Do("SETEX", "activation:"+code, (24 * time.Hour).Seconds(), jsonAct)
+		r.Do("SETEX", "activation:"+code, (24 * time.Hour).Seconds(), n.Email)
 
 		m := gomail.NewMessage()
 		m.SetHeader("From", p.a.email.From)
@@ -75,9 +74,9 @@ func (p *portalAPI) createUser(res http.ResponseWriter, req *http.Request) {
 		m.SetHeader("Subject", "Activate your account")
 		m.SetBody("text/plain", fmt.Sprintf(`Hi %s,
 
-		please activate your developer account by clicking on this link:
-		%s/account/activate/%s
-		`, u.Name, p.a.email.LinkBase, code))
+please activate your developer account by visiting this link:
+%s
+`, u.Name, link))
 
 		d := gomail.NewPlainDialer(p.a.email.Server, p.a.email.Port, p.a.email.User, p.a.email.Password)
 		d.DialAndSend(m)
@@ -89,7 +88,7 @@ func (p *portalAPI) activateUser(res http.ResponseWriter, req *http.Request) {
 	vars := mux.Vars(req)
 	activationKey := vars["key"]
 	r := p.a.redis.Get()
-	actJson, err := redis.Bytes(r.Do("GET", "activation:"+activationKey))
+	email, err := redis.String(r.Do("GET", "activation:"+activationKey))
 	if err != nil {
 		if err == redis.ErrNil {
 			abort(res, 403, "Invalid or expired activation code.")
@@ -98,23 +97,14 @@ func (p *portalAPI) activateUser(res http.ResponseWriter, req *http.Request) {
 			abort(res, 500, err.Error())
 		}
 	}
-	act := activationData{}
-	json.Unmarshal(actJson, &act)
-	if act.Email == "" {
-		abort(res, 500, "Invalid activation data.")
-		return
-	}
-	if p.m.ActivateUser(act.Email) != nil {
+	if err = p.m.ActivateUser(email); err != nil {
 		abort(res, 500, "Could not activate account: %s", err.Error())
 		return
 	}
-	r.Do("DELETE", "activation:"+activationKey)
-	if act.After != "" {
-		http.Redirect(res, req, act.After, 302)
-	} else {
-		res.WriteHeader(http.StatusOK)
-		res.Write([]byte("Activation successful. Please return to the login page and log in."))
-	}
+	r.Do("DEL", "activation:"+activationKey)
+	finish(res, map[string]interface{}{
+		"success": "Activation successful. Please return to the login page.",
+	})
 }
 
 func (p *portalAPI) getToken(res http.ResponseWriter, req *http.Request) {

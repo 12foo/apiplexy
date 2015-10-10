@@ -57,7 +57,6 @@ type apiplexConfigPlugins struct {
 type apiplexConfigEmail struct {
 	AlertsTo       []string `yaml:"alerts_to"`
 	AlertsCooldown int      `yaml:"alerts_cooldown"`
-	LinkBase       string   `yaml:"link_base"`
 	From           string
 	Server         string
 	Port           int

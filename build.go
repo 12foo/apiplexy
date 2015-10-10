@@ -81,7 +81,6 @@ func ExampleConfiguration(pluginNames []string) (*ApiplexConfig, error) {
 		Email: apiplexConfigEmail{
 			AlertsTo:       []string{"your@email.com"},
 			AlertsCooldown: 30,
-			LinkBase:       "http://localhost:5000/portal-api/",
 			From:           "Your API <noreply@your-api.com>",
 			Server:         "localhost",
 			Port:           25,
@@ -207,6 +206,10 @@ func ensureFinalSlash(s string) string {
 func buildApiplex(config ApiplexConfig) (*apiplex, error) {
 	if config.Serve.API == "" {
 		config.Serve.API = "/"
+	}
+
+	if len(config.Email.AlertsTo) == 0 {
+		return nil, fmt.Errorf("You must define at least one recipient for error alert emails.")
 	}
 
 	if config.Serve.SigningKey == "" {
