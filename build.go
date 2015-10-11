@@ -245,10 +245,6 @@ func buildApiplex(config ApiplexConfig) (*apiplex, error) {
 		config.Serve.API = "/"
 	}
 
-	if len(config.Email.AlertsTo) == 0 {
-		return nil, fmt.Errorf("You must define at least one recipient for error alert emails.")
-	}
-
 	if config.Serve.SigningKey == "" {
 		config.Serve.SigningKey = uniuri.NewLen(64)
 	}

@@ -32,7 +32,7 @@ type processingError struct {
 }
 
 func (ap *apiplex) reportError(err error) {
-	if ap.lastAlert == nil || time.Since(*ap.lastAlert) > time.Duration(ap.email.AlertsCooldown)*time.Minute {
+	if len(ap.email.AlertsTo) > 0 && (ap.lastAlert == nil || time.Since(*ap.lastAlert) > time.Duration(ap.email.AlertsCooldown)*time.Minute) {
 		now := time.Now()
 		ap.lastAlert = &now
 		m := gomail.NewMessage()
