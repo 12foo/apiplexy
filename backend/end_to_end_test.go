@@ -2,6 +2,9 @@ package backend
 
 import (
 	"bytes"
+	"crypto/hmac"
+	"crypto/sha1"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"github.com/12foo/apiplexy"
@@ -27,8 +30,7 @@ const yaml_config = `redis:
 quotas:
   default:
     minutes: 5
-    max_ip: 50
-    max_key: 5000
+    max_key: 10
   keyless:
     minutes: 5
     max_ip: 5
@@ -136,7 +138,7 @@ func TestPortalAPI(t *testing.T) {
 			"email":    "test@user.com",
 			"name":     "Test User",
 			"password": "test-password",
-			"after":    "http://example-redirect.com",
+			"link":     "http://example-redirect.com/CODE",
 		}))
 		req.Header.Set("Content-Type", "application/json")
 		res := httptest.NewRecorder()
@@ -163,8 +165,7 @@ func TestPortalAPI(t *testing.T) {
 		req, _ := http.NewRequest("GET", "/portal-api/account/activate/"+code, nil)
 		res := httptest.NewRecorder()
 		ap.ServeHTTP(res, req)
-		So(res, shouldHaveStatus, 302)
-		So(res.Header().Get("Location"), ShouldEqual, "http://example-redirect.com")
+		So(res, shouldHaveStatus, 200)
 	})
 
 	Convey("Activated user can log in", t, func() {
@@ -185,6 +186,7 @@ func TestPortalAPI(t *testing.T) {
 	})
 
 	var ktype string
+	var key apiplexy.Key
 
 	Convey("Valid user can access protected paths", t, func() {
 		req, _ := http.NewRequest("GET", "/portal-api/keys/types", nil)
@@ -227,9 +229,51 @@ func TestPortalAPI(t *testing.T) {
 		res := httptest.NewRecorder()
 		ap.ServeHTTP(res, req)
 		So(res, shouldHaveStatus, 200)
-		var keys []apiplexy.Key
+		var keys []struct {
+			Key apiplexy.Key
+		}
 		json.Unmarshal(res.Body.Bytes(), &keys)
 		So(len(keys), ShouldEqual, 1)
+		key = keys[0].Key
+	})
+
+	Convey("Access with invalid signature shouldn't work", t, func() {
+		for i := 1; i <= 10; i++ {
+			r := httptest.NewRecorder()
+			req, _ := http.NewRequest("GET", "/", nil)
+			mac := hmac.New(sha1.New, []byte(key.Data["secret"].(string)))
+			mac.Write([]byte(req.Header.Get("Date")))
+			sig := base64.StdEncoding.EncodeToString(mac.Sum(nil))
+			req.Header.Set("Authorization", fmt.Sprintf("Signature keyId=\"%s\",algorithm=\"hmac-sha1\",signature=\"%s\"", key.ID, "dummy"+sig))
+			ap.ServeHTTP(r, req)
+			So(r, shouldHaveStatus, 403)
+		}
+	})
+
+	Convey("Access with key should work within limits", t, func() {
+		for i := 1; i <= 10; i++ {
+			r := httptest.NewRecorder()
+			req, _ := http.NewRequest("GET", "/", nil)
+			mac := hmac.New(sha1.New, []byte(key.Data["secret"].(string)))
+			mac.Write([]byte(req.Header.Get("Date")))
+			sig := base64.StdEncoding.EncodeToString(mac.Sum(nil))
+			req.Header.Set("Authorization", fmt.Sprintf("Signature keyId=\"%s\",algorithm=\"hmac-sha1\",signature=\"%s\"", key.ID, sig))
+			ap.ServeHTTP(r, req)
+			So(r, shouldHaveStatus, 200)
+			So(r.Body.String(), ShouldEqual, "API-OK")
+		}
+	})
+
+	Convey("Access with key should deny if over per_key limit", t, func() {
+		r := httptest.NewRecorder()
+		req, _ := http.NewRequest("GET", "/", nil)
+		mac := hmac.New(sha1.New, []byte(key.Data["secret"].(string)))
+		mac.Write([]byte(req.Header.Get("Date")))
+		sig := base64.StdEncoding.EncodeToString(mac.Sum(nil))
+		req.Header.Set("Authorization", fmt.Sprintf("Signature keyId=\"%s\",algorithm=\"hmac-sha1\",signature=\"%s\"", key.ID, sig))
+		ap.ServeHTTP(r, req)
+		So(r, shouldHaveStatus, 403)
+		So(r.Body.String(), ShouldNotEqual, "API-OK")
 	})
 
 }

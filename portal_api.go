@@ -178,6 +178,13 @@ func (p *portalAPI) getAllKeys(email string, res http.ResponseWriter, req *http.
 		return
 	}
 
+	results := make([]keyWithQuota, len(keys))
+	if len(results) == 0 {
+		finish(res, results)
+		return
+	}
+
+	avgs := make([]float64, len(keys))
 	redisAvgKeys := make([]interface{}, len(keys))
 	for i, k := range keys {
 		redisAvgKeys[i] = "quota:key:" + k.ID + ":avg"
@@ -187,12 +194,10 @@ func (p *portalAPI) getAllKeys(email string, res http.ResponseWriter, req *http.
 	if err != nil {
 		abort(res, 500, err.Error())
 	}
-	avgs := make([]float64, len(keys))
 	if err = redis.ScanSlice(rawAvgs, &avgs); err != nil {
 		abort(res, 500, err.Error())
 	}
 
-	results := make([]keyWithQuota, len(keys))
 	for i, k := range keys {
 		q, ok := p.a.quotas[k.Quota]
 		if !ok {
@@ -202,7 +207,7 @@ func (p *portalAPI) getAllKeys(email string, res http.ResponseWriter, req *http.
 		results[i] = kwq
 	}
 
-	finish(res, keys)
+	finish(res, results)
 }
 
 func (p *portalAPI) createKey(email string, res http.ResponseWriter, req *http.Request) {

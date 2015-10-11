@@ -67,7 +67,7 @@ type apiplexConfigEmail struct {
 type apiplexQuota struct {
 	Minutes int `json:"minutes"`
 	MaxIP   int `json:"max_ip,omitempty" yaml:"max_ip,omitempty"`
-	MaxKey  int `json:"max_ip,omitempty" yaml:"max_key,omitempty"`
+	MaxKey  int `json:"max_key,omitempty" yaml:"max_key,omitempty"`
 }
 
 type ApiplexConfig struct {
