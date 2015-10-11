@@ -31,17 +31,26 @@ type processingError struct {
 	Error string `json:"error"`
 }
 
+func (ap *apiplex) sendEmail(to string, subject string, contentType string, body string) {
+	m := gomail.NewMessage()
+	m.SetHeader("From", ap.email.From)
+	if to == "alerts" {
+		m.SetHeader("To", ap.email.AlertsTo...)
+	} else {
+		m.SetHeader("To", to)
+	}
+	m.SetHeader("Subject", subject)
+	m.SetBody(contentType, body)
+	d := gomail.NewPlainDialer(ap.email.Server, ap.email.Port, ap.email.User, ap.email.Password)
+	d.DialAndSend(m)
+}
+
 func (ap *apiplex) reportError(err error) {
 	if len(ap.email.AlertsTo) > 0 && (ap.lastAlert == nil || time.Since(*ap.lastAlert) > time.Duration(ap.email.AlertsCooldown)*time.Minute) {
 		now := time.Now()
+		ap.sendEmail("alerts", "[API Error] Error on API gateway", "text/plain; charset=UTF-8",
+			err.Error())
 		ap.lastAlert = &now
-		m := gomail.NewMessage()
-		m.SetHeader("From", ap.email.From)
-		m.SetHeader("To", ap.email.AlertsTo...)
-		m.SetHeader("Subject", "[API Error] Error on API gateway")
-		m.SetBody("text/plain; charset=UTF-8", err.Error())
-		d := gomail.NewPlainDialer(ap.email.Server, ap.email.Port, ap.email.User, ap.email.Password)
-		d.DialAndSend(m)
 	}
 }
 
@@ -292,9 +301,7 @@ func (ap *apiplex) HandleAPI(res http.ResponseWriter, req *http.Request) {
 			now := time.Now()
 			ap.lastAlert = &now
 			m := gomail.NewMessage()
-			m.SetHeader("From", ap.email.From)
-			m.SetHeader("To", ap.email.AlertsTo...)
-			m.SetHeader("Subject", "[API Error] Upstream server error")
+			subject := "[API Error] Upstream server error"
 
 			type detail struct {
 				Item  string
@@ -323,9 +330,9 @@ func (ap *apiplex) HandleAPI(res http.ResponseWriter, req *http.Request) {
 			ebody = ebody + "</table><hr>"
 
 			if strings.HasPrefix(urs.Header.Get("Content-Type"), "text/html") {
-				m.SetBody("text/html", ebody+string(body))
+				ap.sendEmail("alerts", subject, "text/html", ebody+string(body))
 			} else {
-				m.SetBody("text/html", ebody+"<pre>"+string(body)+"</pre>")
+				ap.sendEmail("alerts", subject, "text/html", ebody+"<pre>"+string(body)+"</pre>")
 			}
 
 			d := gomail.NewPlainDialer(ap.email.Server, ap.email.Port, ap.email.User, ap.email.Password)

@@ -7,7 +7,6 @@ import (
 	"github.com/dgrijalva/jwt-go"
 	"github.com/garyburd/redigo/redis"
 	"github.com/gorilla/mux"
-	"gopkg.in/gomail.v2"
 	"net/http"
 	"strings"
 	"time"
@@ -69,18 +68,11 @@ func (p *portalAPI) createUser(res http.ResponseWriter, req *http.Request) {
 		r := p.a.redis.Get()
 		r.Do("SETEX", "activation:"+code, (24 * time.Hour).Seconds(), n.Email)
 
-		m := gomail.NewMessage()
-		m.SetHeader("From", p.a.email.From)
-		m.SetHeader("To", n.Email)
-		m.SetHeader("Subject", "Activate your account")
-		m.SetBody("text/plain", fmt.Sprintf(`Hi %s,
+		p.a.sendEmail(n.Email, "Activate your account", "text/plain", fmt.Sprintf(`Hi %s,
 
 please activate your developer account by visiting this link:
 %s
 `, u.Name, link))
-
-		d := gomail.NewPlainDialer(p.a.email.Server, p.a.email.Port, p.a.email.User, p.a.email.Password)
-		d.DialAndSend(m)
 	}
 	finish(res, &u)
 }
@@ -262,6 +254,63 @@ func (p *portalAPI) deleteKey(email string, res http.ResponseWriter, req *http.R
 	finish(res, &msg)
 }
 
+func (p *portalAPI) requestResetPassword(res http.ResponseWriter, req *http.Request) {
+	decoder := json.NewDecoder(req.Body)
+	rq := struct {
+		Email string `json:"email"`
+		Link  string `json:"link"`
+	}{}
+	if decoder.Decode(&rq) != nil || rq.Email == "" || rq.Link == "" {
+		abort(res, 400, "Specify your email and a link to reset your password.")
+		return
+	}
+	u := p.m.GetUser(rq.Email)
+	if u == nil {
+		abort(res, 404, "User not found.")
+		return
+	}
+	code := uniuri.NewLen(48)
+	r := p.a.redis.Get()
+	_, err := r.Do("SETEX", "password-reset:"+code, 60*60, rq.Email)
+	if err != nil {
+		abort(res, 500, "Couldn't store your password reset request. Please contact an administrator.")
+		return
+	}
+
+	p.a.sendEmail(rq.Email, "Reset your password", "text/plain; charset=UTF-8", fmt.Sprintf(`Hi %s,
+
+to reset your password, please visit this link:
+%s
+`, u.Name, strings.Replace(rq.Link, "CODE", code, 1)))
+
+	finish(res, &rq)
+}
+
+func (p *portalAPI) resetPassword(res http.ResponseWriter, req *http.Request) {
+	decoder := json.NewDecoder(req.Body)
+	rq := struct {
+		Code     string `json:"code"`
+		Password string `json:"password"`
+	}{}
+	if decoder.Decode(&rq) != nil || rq.Code == "" || rq.Password == "" {
+		abort(res, 400, "Provide the reset code and a new password to reset your password.")
+		return
+	}
+
+	r := p.a.redis.Get()
+	email, err := redis.String(r.Do("GET", "password-reset:"+rq.Code))
+	if err != nil {
+		abort(res, 400, "Invalid or expired password reset code.")
+		return
+	}
+	err = p.m.ResetPassword(email, rq.Password)
+	if err != nil {
+		abort(res, 500, err.Error())
+	}
+	r.Do("DEL", "password-reset:"+rq.Code)
+	finish(res, map[string]interface{}{"success": "Password successfully reset."})
+}
+
 func (p *portalAPI) auth(inner func(string, http.ResponseWriter, *http.Request)) func(http.ResponseWriter, *http.Request) {
 	return func(res http.ResponseWriter, req *http.Request) {
 		token, err := jwt.ParseFromRequest(req, func(token *jwt.Token) (interface{}, error) {
@@ -321,6 +370,8 @@ func (ap *apiplex) BuildPortalAPI(prefix string) (*mux.Router, error) {
 
 	r.HandleFunc("/account", p.createUser).Methods("POST")
 	r.HandleFunc("/account/activate/{key}", p.activateUser)
+	r.HandleFunc("/account/request", p.requestResetPassword).Methods("POST")
+	r.HandleFunc("/account/reset", p.resetPassword).Methods("POST")
 	r.HandleFunc("/account/token", p.getToken).Methods("POST")
 	r.HandleFunc("/account/update", p.auth(p.updateProfile)).Methods("POST")
 	r.HandleFunc("/keys/types", p.auth(p.getKeyTypes))
