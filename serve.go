@@ -138,18 +138,15 @@ func (ap *apiplex) authenticateRequest(req *http.Request, rd redis.Conn, ctx *AP
 	return nil
 }
 
-// checks a single quota (e.g. per_ip or per_key).
+// checks a single quota (e.g. per_ip or per_key). This is done inside redis
+// using lua scripting (for atomicity). The script is at the top of build.go
+// and loaded into redis at the end of the building phase.
 func (ap *apiplex) overQuota(rd redis.Conn, key string, cost, max, minutes int) bool {
-	current, err := redis.Int(rd.Do("GET", key))
-	if err == redis.ErrNil {
-		current = 0
-		rd.Do("SETEX", key, minutes*60, 0)
+	over, err := redis.Int(ap.ewmaScript.Do(rd, key+":ts", key+":avg", time.Now().Unix(), max, minutes*60, cost))
+	if err != nil {
+		ap.reportError(err)
 	}
-	if current+cost > max {
-		return true
-	}
-	rd.Do("INCRBY", key, cost)
-	return false
+	return over == 1
 }
 
 // checks a request's quota by its context.

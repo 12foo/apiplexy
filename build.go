@@ -12,6 +12,42 @@ import (
 	"time"
 )
 
+// Rate limiting is handled by an exponentially weighted moving
+// average calculation that's done inside Redis. This is the lua code
+// for that calculaton; it's loaded into Redis on startup.
+//
+// http://www-uxsup.csx.cam.ac.uk/~fanf2/hermes/doc/antiforgery/ratelimit-demo.html
+const ewmaScript = `
+    local kts, kavg = unpack(KEYS)
+    local now, max, period, cost = tonumber(ARGV[1]), tonumber(ARGV[2]), tonumber(ARGV[3]), tonumber(ARGV[4])
+
+    local last = redis.call('GET', kts)
+    local avg, dt
+
+    if last ~= false then
+        avg = redis.call('GET', kavg)
+        if avg == false then avg = 0 else avg = tonumber(avg) end
+        dt = now - tonumber(last)
+    else
+        avg = 0
+        dt = period
+    end
+    if dt == 0 then dt = 1 end
+
+    local a = math.exp(-dt/period)
+    local rate = cost * period / dt
+    avg = (1 - a) * rate + a * avg
+
+    if avg > max then
+        return 1
+    else
+        local expire = period * 2
+        redis.call('SETEX', kts, expire, now)
+        redis.call('SETEX', kavg, expire, avg)
+        return 0
+    end
+`
+
 type apiplexPluginInfo struct {
 	Name        string
 	Description string
@@ -35,6 +71,7 @@ type apiplex struct {
 	authCacheMins int
 	quotas        map[string]apiplexQuota
 	allowKeyless  bool
+	ewmaScript    *redis.Script
 	redis         *redis.Pool
 	auth          []AuthPlugin
 	backends      []BackendPlugin
@@ -350,9 +387,11 @@ func buildApiplex(config ApiplexConfig) (*apiplex, error) {
 			return err
 		},
 	}
-	// test connection
+
+	// test connection (by loading script)
 	rd := ap.redis.Get()
-	_, err = rd.Do("PING")
+	ap.ewmaScript = redis.NewScript(2, ewmaScript)
+	err = ap.ewmaScript.Load(rd)
 	if err != nil {
 		log.Fatalf("Couldn't connect to Redis. %s", err.Error())
 	}
@@ -371,7 +410,7 @@ func (ap *apiplex) Shutdown() {
 	for _, st := range ap.startables {
 		err := st.Stop()
 		if err != nil {
-			log.Printf("Error starting plugin. %s\n", err.Error())
+			log.Printf("Error stopping plugin. %s\n", err.Error())
 		}
 	}
 }

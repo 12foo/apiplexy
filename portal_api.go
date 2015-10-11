@@ -22,9 +22,10 @@ type portalAPI struct {
 	keyplugins map[string]AuthPlugin
 }
 
-type activationData struct {
-	Email string `json:"email"`
-	Link  string `json:"link"`
+type keyWithQuota struct {
+	Key   *Key         `json:"key"`
+	Quota apiplexQuota `json:"quota"`
+	Avg   float64      `json:"avg"`
 }
 
 func abort(res http.ResponseWriter, code int, message string, args ...interface{}) {
@@ -131,8 +132,10 @@ func (p *portalAPI) getToken(res http.ResponseWriter, req *http.Request) {
 		return
 	}
 	tjson := struct {
+		Name  string `json:"name"`
+		Email string `json:"email"`
 		Token string `json:"token"`
-	}{Token: ts}
+	}{u.Name, u.Email, ts}
 	finish(res, &tjson)
 }
 
@@ -174,6 +177,31 @@ func (p *portalAPI) getAllKeys(email string, res http.ResponseWriter, req *http.
 		abort(res, 500, err.Error())
 		return
 	}
+
+	redisAvgKeys := make([]interface{}, len(keys))
+	for i, k := range keys {
+		redisAvgKeys[i] = "quota:key:" + k.ID + ":avg"
+	}
+	r := p.a.redis.Get()
+	rawAvgs, err := redis.Values(r.Do("MGET", redisAvgKeys...))
+	if err != nil {
+		abort(res, 500, err.Error())
+	}
+	avgs := make([]float64, len(keys))
+	if err = redis.ScanSlice(rawAvgs, &avgs); err != nil {
+		abort(res, 500, err.Error())
+	}
+
+	results := make([]keyWithQuota, len(keys))
+	for i, k := range keys {
+		q, ok := p.a.quotas[k.Quota]
+		if !ok {
+			q = p.a.quotas["default"]
+		}
+		kwq := keyWithQuota{Key: k, Quota: q, Avg: avgs[i]}
+		results[i] = kwq
+	}
+
 	finish(res, keys)
 }
 
@@ -202,7 +230,12 @@ func (p *portalAPI) createKey(email string, res http.ResponseWriter, req *http.R
 		abort(res, 500, "The new key could not be stored. %s", err.Error())
 		return
 	}
-	finish(res, &key)
+
+	q, ok := p.a.quotas[key.Quota]
+	if !ok {
+		q = p.a.quotas["default"]
+	}
+	finish(res, keyWithQuota{Key: &key, Quota: q, Avg: 0})
 }
 
 func (p *portalAPI) deleteKey(email string, res http.ResponseWriter, req *http.Request) {
@@ -288,7 +321,7 @@ func (ap *apiplex) BuildPortalAPI(prefix string) (*mux.Router, error) {
 	r.HandleFunc("/keys/types", p.auth(p.getKeyTypes))
 	r.HandleFunc("/keys", p.auth(p.getAllKeys)).Methods("GET")
 	r.HandleFunc("/keys", p.auth(p.createKey)).Methods("POST")
-	r.HandleFunc("/keys/delete", p.auth(p.createKey)).Methods("POST")
+	r.HandleFunc("/keys/delete", p.auth(p.deleteKey)).Methods("POST")
 
 	return r, nil
 }
