@@ -151,6 +151,9 @@ func (ap *apiplex) overQuota(rd redis.Conn, key string, cost, max, minutes int) 
 
 // checks a request's quota by its context.
 func (ap *apiplex) checkQuota(rd redis.Conn, req *http.Request, ctx *APIContext) error {
+	if ctx.Cost == 0 {
+		return nil
+	}
 	var quotaName string
 	var keyID string
 	if ctx.Keyless {
@@ -285,7 +288,7 @@ func (ap *apiplex) HandleAPI(res http.ResponseWriter, req *http.Request) {
 
 	// if something seriously went wrong on the backend, report
 	if urs.StatusCode >= 500 {
-		if ap.lastAlert == nil || time.Since(*ap.lastAlert) > time.Duration(ap.email.AlertsCooldown)*time.Minute {
+		if len(ap.email.AlertsTo) > 0 && (ap.lastAlert == nil || time.Since(*ap.lastAlert) > time.Duration(ap.email.AlertsCooldown)*time.Minute) {
 			now := time.Now()
 			ap.lastAlert = &now
 			m := gomail.NewMessage()
