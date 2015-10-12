@@ -95,11 +95,16 @@ type User struct {
 // The key's Realm is either an app identifier (for native apps) or a web domain.
 // If apiplexy receives a request with a Referrer header set (meaning it came from
 // a web app), it will check the webapp's Referrer domain against the key's Realm.
+//
+// The key's owner is an email address (hopefully found in one of the backing stores.
+// Keys do not require an owner, but ownerless keys don't trigger any quota overage
+// notifications (for obvious reasons).
 type Key struct {
 	ID    string                 `json:"id"`
 	Realm string                 `json:"realm"`
 	Quota string                 `json:"quota"`
 	Type  string                 `json:"type"`
+	Owner string                 `json:"-"`
 	Data  map[string]interface{} `json:"data,omitempty"`
 }
 

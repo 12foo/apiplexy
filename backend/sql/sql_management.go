@@ -33,6 +33,7 @@ func (k *sqlDBKey) toKey() *apiplexy.Key {
 		Realm: k.Realm,
 		Type:  k.Type,
 		Quota: k.Quota,
+		Owner: k.User,
 	}
 	json.Unmarshal([]byte(k.Data), &ck.Data)
 	return &ck

@@ -188,6 +188,21 @@ func (ap *apiplex) checkQuota(rd redis.Conn, req *http.Request, ctx *APIContext)
 	}
 	if quota.MaxKey > 0 {
 		if ap.overQuota(rd, "quota:key:"+keyID, ctx.Cost, quota.MaxKey, quota.Minutes) {
+			if ctx.Key.Owner != "" {
+				notified, err := redis.Bool(rd.Do("GET", "quota:key:"+keyID+":notified"))
+				if err == nil && notified {
+					ap.sendEmail(ctx.Key.Owner, "[WARNING] Quota exceeded", "text/plain; charset=UTF-8",
+						fmt.Sprintf(`This is an automated warning message. One of your API keys has exceeded its quota.
+
+Key ID: %s
+Realm : %s
+Quota : %d requests per %d minutes
+
+This warning will repeat every hour as long as the key continues to exceed its quota.
+`, ctx.Key.ID, ctx.Key.Realm, quota.MaxKey, quota.Minutes))
+					rd.Do("SETEX", "quota:key:"+keyID+":notified", 60*60, true)
+				}
+			}
 			return Abort(403, fmt.Sprintf("Request quota per key exceeded (%d reqs / %d mins). Please wait before making new requests.", quota.MaxKey, quota.Minutes))
 		}
 	}
