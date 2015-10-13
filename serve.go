@@ -181,7 +181,12 @@ func (ap *apiplex) checkQuota(rd redis.Conn, req *http.Request, ctx *APIContext)
 		return nil
 	}
 	if quota.MaxIP > 0 {
-		clientIP, _, _ := net.SplitHostPort(req.RemoteAddr)
+		var clientIP string
+		if req.Header.Get("X-Forwarded-For") != "" {
+			clientIP = req.Header.Get("X-Forwarded-For")
+		} else {
+			clientIP, _, _ = net.SplitHostPort(req.RemoteAddr)
+		}
 		if ap.overQuota(rd, "quota:ip:"+keyID+":"+clientIP, ctx.Cost, quota.MaxIP, quota.Minutes) {
 			return Abort(403, fmt.Sprintf("Request quota per IP exceeded (%d reqs / %d mins). Please wait before making new requests.", quota.MaxIP, quota.Minutes))
 		}
