@@ -55,3 +55,10 @@ $ go get -f -u github.com/aarzilli/golua/lua
 
 before you build.
 
+### License
+
+apiplexy is licensed under MIT, with a **special restriction**: you may not sell
+apiplexy itself as a SaaS service. Meaning, you can run your own
+commercial/paid services behind apiplexy, but you can't sell apiplexy itself as
+a service to become the next 3scale/Apigee/etc. For details, see the LICENSE
+file.
