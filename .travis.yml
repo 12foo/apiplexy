@@ -1,0 +1,17 @@
+language: go
+sudo: false
+
+go:
+    - 1.5
+
+install: source ./.travis.sh
+
+services:
+    - redis-server
+
+addons:
+    apt:
+        packages:
+            - luajit
+            - libluajit-5.1-dev
+            - liblua5.1-0-dev
