@@ -4,11 +4,13 @@ import (
 	"fmt"
 	"github.com/dchest/uniuri"
 	"github.com/garyburd/redigo/redis"
+	"github.com/labstack/echo"
 	"log"
 	"net/http"
 	"net/url"
 	"reflect"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -66,8 +68,7 @@ type apiplex struct {
 	signingKey    string
 	email         apiplexConfigEmail
 	lastAlert     *time.Time
-	upstreams     []APIUpstream
-	apipath       string
+	upstreams     map[string][]APIUpstream
 	authCacheMins int
 	quotas        map[string]apiplexQuota
 	allowKeyless  bool
@@ -134,10 +135,14 @@ func ExampleConfiguration(pluginNames []string) (*ApiplexConfig, error) {
 			},
 		},
 		Serve: apiplexConfigServe{
-			Port:       5000,
-			API:        "/",
-			Upstreams:  []string{"http://your-actual-api:8000/"},
-			PortalAPI:  "/portal-api/",
+			Port: 5000,
+			Backends: map[string][]string{
+				"/api/": []string{"http://api-backend-server:8000"},
+			},
+			Static: map[string]string{
+				"/": "/path/to/your/portal_or_docs",
+			},
+			PortalAPI:  "/portal/",
 			SigningKey: uniuri.NewLen(64),
 		},
 	}
@@ -230,19 +235,21 @@ func buildPlugins(plugins []apiplexPluginConfig, pluginType reflect.Type, starta
 
 // Helper method so all HTTP paths in the configuration have a final slash
 // (less uncertainty about path matching).
-func ensureFinalSlash(s string) string {
-	if s[len(s)-1] != '/' {
-		return s + "/"
-	} else {
-		return s
-	}
+func ensureSlashes(s string) string {
+	return "/" + strings.Trim(s, "/ ")
 }
 
 // constructs an Apiplex, i.e. an apiplexy struct that can run plugins on
 // requests and proxy them back to one or more upstream backends.
 func buildApiplex(config ApiplexConfig) (*apiplex, error) {
-	if config.Serve.API == "" {
-		config.Serve.API = "/"
+	if len(config.Serve.Backends) == 0 {
+		return nil, fmt.Errorf("You haven't defined any API backends.")
+	}
+
+	for api, bes := range config.Serve.Backends {
+		if len(bes) == 0 {
+			return nil, fmt.Errorf("No backends specified for API path '%s'.", api)
+		}
 	}
 
 	if config.Serve.SigningKey == "" {
@@ -251,7 +258,6 @@ func buildApiplex(config ApiplexConfig) (*apiplex, error) {
 
 	// TODO make everything configurable
 	ap := apiplex{
-		apipath:       ensureFinalSlash(config.Serve.API),
 		authCacheMins: 10,
 		signingKey:    config.Serve.SigningKey,
 		email:         config.Email,
@@ -354,17 +360,21 @@ func buildApiplex(config ApiplexConfig) (*apiplex, error) {
 		ap.logging[i] = cp
 	}
 
-	// upstreams
-	ap.upstreams = make([]APIUpstream, len(config.Serve.Upstreams))
-	for i, us := range config.Serve.Upstreams {
-		u, err := url.Parse(us)
-		if err != nil {
-			return nil, fmt.Errorf("Invalid upstream address: %s", us)
+	// upstream backends
+	ap.upstreams = make(map[string][]APIUpstream, len(config.Serve.Backends))
+	for api, bes := range config.Serve.Backends {
+		ups := make([]APIUpstream, len(bes))
+		for i, up := range bes {
+			u, err := url.Parse(up)
+			if err != nil {
+				return nil, fmt.Errorf("Invalid upstream address: %s", up)
+			}
+			ups[i] = APIUpstream{
+				Client:  &http.Client{},
+				Address: u,
+			}
 		}
-		ap.upstreams[i] = APIUpstream{
-			Client:  &http.Client{},
-			Address: u,
-		}
+		ap.upstreams[api] = ups
 	}
 
 	ap.redis = &redis.Pool{
@@ -411,22 +421,25 @@ func (ap *apiplex) Shutdown() {
 	}
 }
 
-func New(config ApiplexConfig) (*http.ServeMux, error) {
+func New(config ApiplexConfig) (http.Handler, error) {
 	ap, err := buildApiplex(config)
 	if err != nil {
 		return nil, err
 	}
 
-	mux := http.NewServeMux()
-	mux.HandleFunc(ap.apipath, ap.HandleAPI)
-
+	mux := echo.New()
+	for static, path := range config.Serve.Static {
+		mux.Static(static, path)
+	}
+	for api, _ := range config.Serve.Backends {
+		mux.Any(api, ap.HandleAPI)
+	}
 	if config.Serve.PortalAPI != "" {
-		papath := ensureFinalSlash(config.Serve.PortalAPI)
-		portalAPI, err := ap.BuildPortalAPI(config.Serve.PortalAPI)
+		papath := ensureSlashes(config.Serve.PortalAPI)
+		_, err := ap.BuildPortalAPI(mux, papath)
 		if err != nil {
 			return nil, fmt.Errorf("Could not create Portal API. %s", err.Error())
 		}
-		mux.Handle(papath, portalAPI)
 	}
 
 	return mux, nil

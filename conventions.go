@@ -36,12 +36,12 @@ type apiplexConfigRedis struct {
 	Port int
 	DB   int
 }
+
 type apiplexConfigServe struct {
 	Port       int
-	API        string
-	Upstreams  []string
+	Backends   map[string][]string
+	Static     map[string]string
 	PortalAPI  string `yaml:"portal_api"`
-	Portal     string `yaml:"portal"`
 	SigningKey string `yaml:"signing_key"`
 }
 

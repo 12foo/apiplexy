@@ -5,16 +5,18 @@ import (
 	_ "github.com/12foo/apiplexy/auth/hmac"
 	_ "github.com/12foo/apiplexy/backend/sql"
 	_ "github.com/12foo/apiplexy/logging"
+	_ "github.com/12foo/apiplexy/misc"
+	"time"
 )
 
 import (
 	"fmt"
 	"github.com/12foo/apiplexy"
 	"github.com/codegangsta/cli"
+	"github.com/fvbock/endless"
 	"github.com/skratchdot/open-golang/open"
 	"gopkg.in/yaml.v2"
 	"io/ioutil"
-	"net/http"
 	"os"
 	"sort"
 	"strconv"
@@ -90,13 +92,11 @@ func start(c *cli.Context) {
 		os.Exit(2)
 	}
 
-	server := &http.Server{
-		Addr:    "0.0.0.0:" + strconv.Itoa(config.Serve.Port),
-		Handler: ap,
-	}
 	fmt.Printf("Running server on port %d.\n", config.Serve.Port)
-	// TODO graceful shutdown including plugins
-	server.ListenAndServe()
+
+	endless.DefaultReadTimeOut = 10 * time.Second
+	endless.DefaultWriteTimeOut = 10 * time.Second
+	endless.ListenAndServe("0.0.0.0:"+strconv.Itoa(config.Serve.Port), ap)
 }
 
 func main() {

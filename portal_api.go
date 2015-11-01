@@ -6,7 +6,7 @@ import (
 	"github.com/dchest/uniuri"
 	"github.com/dgrijalva/jwt-go"
 	"github.com/garyburd/redigo/redis"
-	"github.com/gorilla/mux"
+	"github.com/labstack/echo"
 	"net/http"
 	"strings"
 	"time"
@@ -77,27 +77,28 @@ please activate your developer account by visiting this link:
 	finish(res, &u)
 }
 
-func (p *portalAPI) activateUser(res http.ResponseWriter, req *http.Request) {
-	vars := mux.Vars(req)
-	activationKey := vars["key"]
+func (p *portalAPI) activateUser(c *echo.Context) error {
+	res := c.Response().Writer()
+	activationKey := c.Param("key")
 	r := p.a.redis.Get()
 	email, err := redis.String(r.Do("GET", "activation:"+activationKey))
 	if err != nil {
 		if err == redis.ErrNil {
 			abort(res, 403, "Invalid or expired activation code.")
-			return
+			return nil
 		} else {
 			abort(res, 500, err.Error())
 		}
 	}
 	if err = p.m.ActivateUser(email); err != nil {
 		abort(res, 500, "Could not activate account: %s", err.Error())
-		return
+		return nil
 	}
 	r.Do("DEL", "activation:"+activationKey)
 	finish(res, map[string]interface{}{
 		"success": "Activation successful. Please return to the login page.",
 	})
+	return nil
 }
 
 func (p *portalAPI) getToken(res http.ResponseWriter, req *http.Request) {
@@ -311,8 +312,10 @@ func (p *portalAPI) resetPassword(res http.ResponseWriter, req *http.Request) {
 	finish(res, map[string]interface{}{"success": "Password successfully reset."})
 }
 
-func (p *portalAPI) auth(inner func(string, http.ResponseWriter, *http.Request)) func(http.ResponseWriter, *http.Request) {
-	return func(res http.ResponseWriter, req *http.Request) {
+func (p *portalAPI) auth(inner func(string, http.ResponseWriter, *http.Request)) func(*echo.Context) error {
+	return func(c *echo.Context) error {
+		res := c.Response().Writer()
+		req := c.Request()
 		token, err := jwt.ParseFromRequest(req, func(token *jwt.Token) (interface{}, error) {
 			if token.Method != jwt.SigningMethodHS256 {
 				return nil, fmt.Errorf("Token signed with an incorrect method: %v", token.Header["alg"])
@@ -321,14 +324,15 @@ func (p *portalAPI) auth(inner func(string, http.ResponseWriter, *http.Request))
 		})
 		if err != nil {
 			abort(res, 403, "Access denied: %s -- please authenticate using a valid token.", err.Error())
-			return
+			return nil
 		}
 		email, ok := token.Claims["email"].(string)
 		if !ok {
 			abort(res, 403, "Access denied: user token did not supply a valid user.", err.Error())
-			return
+			return nil
 		}
 		inner(email, res, req)
+		return nil
 	}
 }
 
@@ -355,29 +359,37 @@ func (ap *apiplex) buildPortalAPI() (*portalAPI, error) {
 	}, nil
 }
 
-func (ap *apiplex) BuildPortalAPI(prefix string) (*mux.Router, error) {
+func middleware() echo.HandlerFunc {
+	return func(c *echo.Context) error {
+		return nil
+	}
+}
+
+func (ap *apiplex) BuildPortalAPI(mux *echo.Echo, path string) (*echo.Group, error) {
 	p, err := ap.buildPortalAPI()
 	if err != nil {
 		return nil, err
 	}
 
-	r := mux.NewRouter().PathPrefix(prefix).MatcherFunc(func(r *http.Request, rm *mux.RouteMatch) bool {
-		if r.Method == "GET" {
-			return true
-		}
-		return strings.HasPrefix(r.Header.Get("Content-Type"), "application/json")
-	}).Subrouter()
+	r := mux.Group(path)
+	r.Use(middleware())
+	r.Post("/account", p.createUser)
+	r.Get("/account/activate/:key", p.activateUser)
+	r.Post("/account/request", p.requestResetPassword)
+	r.Post("/account/reset", p.resetPassword)
+	r.Post("/account/token", p.getToken)
+	r.Post("/account/update", p.auth(p.updateProfile))
+	r.Get("/keys/types", p.auth(p.getKeyTypes))
+	r.Get("/keys", p.auth(p.getAllKeys))
+	r.Post("/keys", p.auth(p.createKey))
+	r.Post("/keys/delete", p.auth(p.deleteKey))
 
-	r.HandleFunc("/account", p.createUser).Methods("POST")
-	r.HandleFunc("/account/activate/{key}", p.activateUser)
-	r.HandleFunc("/account/request", p.requestResetPassword).Methods("POST")
-	r.HandleFunc("/account/reset", p.resetPassword).Methods("POST")
-	r.HandleFunc("/account/token", p.getToken).Methods("POST")
-	r.HandleFunc("/account/update", p.auth(p.updateProfile)).Methods("POST")
-	r.HandleFunc("/keys/types", p.auth(p.getKeyTypes))
-	r.HandleFunc("/keys", p.auth(p.getAllKeys)).Methods("GET")
-	r.HandleFunc("/keys", p.auth(p.createKey)).Methods("POST")
-	r.HandleFunc("/keys/delete", p.auth(p.deleteKey)).Methods("POST")
+	// r := mux.NewRouter().PathPrefix(prefix).MatcherFunc(func(r *http.Request, rm *mux.RouteMatch) bool {
+	// 	if r.Method == "GET" {
+	// 		return true
+	// 	}
+	// 	return strings.HasPrefix(r.Header.Get("Content-Type"), "application/json")
+	// }).Subrouter()
 
 	return r, nil
 }

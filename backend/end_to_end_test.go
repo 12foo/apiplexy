@@ -36,9 +36,9 @@ quotas:
     max_ip: 5
 serve:
   port: 5000
-  api: /
-  upstreams:
-  - http://your-actual-api:8000/
+  backends:
+    /:
+    - http://your-actual-api:8000/
   portal_api: /portal-api/
   signing_key: test-signing-key
 plugins:
@@ -84,12 +84,13 @@ func TestMain(m *testing.M) {
 	if err := yaml.Unmarshal([]byte(yaml_config), &config); err != nil {
 		log.Fatalln(err)
 	}
-	config.Serve.Upstreams[0] = mockAPI.URL
+	config.Serve.Backends["/"][0] = mockAPI.URL
 	a, err := apiplexy.New(config)
 	if err != nil {
 		log.Fatalln(err)
 	}
-	ap = a
+	ap = http.NewServeMux()
+	ap.Handle("/", a)
 
 	r, _ := redis.Dial("tcp", config.Redis.Host+":"+strconv.Itoa(config.Redis.Port))
 	r.Do("SELECT", 1)

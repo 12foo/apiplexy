@@ -223,9 +223,19 @@ func (ap *apiplex) HandleAPI(res http.ResponseWriter, req *http.Request) {
 	ctx := APIContext{
 		Keyless: false,
 		Cost:    1,
-		Path:    "/" + strings.TrimSuffix(strings.TrimPrefix(req.URL.Path, ap.apipath), "/"),
 		Log:     make(map[string]interface{}),
 		Data:    make(map[string]interface{}),
+	}
+	var apipath string
+	for path, backends := range ap.upstreams {
+		if strings.HasPrefix(req.URL.Path, path) {
+			apipath = path
+			if len(backends) == 1 {
+				ctx.Upstream = &backends[0]
+			} else {
+				ctx.Upstream = &backends[rand.Intn(len(backends))]
+			}
+		}
 	}
 
 	// TODO determine actual(!) client IP address and add to ctx.Log
@@ -257,7 +267,8 @@ func (ap *apiplex) HandleAPI(res http.ResponseWriter, req *http.Request) {
 	}
 
 	if ctx.Upstream == nil {
-		ctx.Upstream = &ap.upstreams[rand.Intn(len(ap.upstreams))]
+		ap.error(500, fmt.Errorf("Request to '%s' has no upstream backend set.", ctx.Path), res)
+		return
 	}
 
 	// prepare request for backend
@@ -266,7 +277,7 @@ func (ap *apiplex) HandleAPI(res http.ResponseWriter, req *http.Request) {
 
 	outreq.URL.Scheme = ctx.Upstream.Address.Scheme
 	outreq.URL.Host = ctx.Upstream.Address.Host
-	outreq.URL.Path = strings.Replace(outreq.URL.Path, ap.apipath, ctx.Upstream.Address.Path, 1)
+	outreq.URL.Path = strings.Replace(outreq.URL.Path, apipath, ctx.Upstream.Address.Path, 1)
 	outreq.RequestURI = ""
 	outreq.Close = false
 

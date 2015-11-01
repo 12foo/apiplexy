@@ -1,45 +1,61 @@
 # apiplexy
 
-An API gateway / management swiss army knife for pissed-off engineers who need
+An API gateway / management swiss army knife for disgruntled nerds who need
 things to work yesterday, using stuff they have already lying around.
 
-## Features/Non-Features
+## Features
 
-  * You only need to have Redis running, everything else is optional.
-  * Does access control, (smooth) rate limiting, reverse proxying and basic
-    error reporting at its core, plus lots of other stuff via plugins. Try
-    `apiplexy plugins` for a list.
-  * Allows multiple different per-key and per-IP quotas, plus a 'keyless'
-    quota for giving people a taste.
-  * No fancy GUI. The complete configuration is in one YAML file.
-  * `apiplexy gen-conf [plugin-name...]` generates a skeleton configuration for you.
-    Just modify and run.
-  * Doesn't do its own stats. Use a plugin to log to your existing stats services,
-    like InfluxDB, Logstash or Graphite.
-  * Doesn't bring its own user/key backing store. Use a plugin to connect to
-    existing databases like MongoDB, SQLite, Postgres, MySQL, and so on.
-  * Move easily from your previous API management system by connecting it as your
-    second (or third...) backing store. Old keys will just keep working.
-  * apiplexy doesn't do exactly what you need? Use Lua scripting straight from
-    your config, or extend apiplexy by writing your own Go plugins (pull requests
-    welcome).
+  * Requires only Redis to run (everything else is a plugin).
+  * All configuration is in one YAML text file. The CLI can generate one to get
+    you started.
+  * Serves both static files and backend APIs (including simple load balancing).
+  * Supports multiple usage quotas, including a keyless one for free testing.
+  * Authenticate using HMAC, OAuth2, HTTP PLAIN or write your own scheme.
+  * Keep your keys, users and traffic stats where you like (most popular SQL
+    databases, InfluxDB, ElasticSearch, mongoDB + pull requests welcome).
+  * You can use multiple user/key backends to support authentication from multiple
+    sources, making switchovers painless.
+  * Lua scripting right in the config for small tweaks.
+  * Easy to customize by writing Go plugins and recompiling if scripting isn't
+    enough for you.
+
+### How is apiplexy different from...
+
+  * **[Tyk](http://tyk.io/)**: apiplexy doesn't come with a fancy web frontend
+    (actually, I prefer text-based configuration. For a *user* frontend, see
+    below). apiplexy also doesn't force you to do everything, including API
+    stats, in mongoDB.
+  * **[Kong](http://https://getkong.org/)**: apiplexy doesn't require you to
+    set up OpenResty, Lua, and a Cassandra cluster. apiplexy also isn't really
+    intended for managing multiple entirely separate APIs, but you can do that
+    with clever use of quotas and a simple Lua script if you really want to.
+
+Note that either of these may still be a better fit for you than apiplexy; I encourage
+you to check them out.
 
 ### Developer Portal/Frontend
 
-The same philosophy extends to the frontend: apiplexy doesn't prescribe Swagger, RAML,
-Blueprint or what-have-you for your frontend and docs. Those all have great documentation
-browsers already that you can just use.
+apiplexy doesn't come with a built-in frontend for users, and especially not
+one that displays the API documentation. There's a bunch of different API docs
+frameworks around (Swagger, RAML, Blueprint...) that already have great
+documentation browsers. Just use what you like, and serve the documentation
+pages using apiplexy's static paths.
 
-But developers need a place where they can create and manage their keys, or maybe
-read up on the docs, right? No problem. Just hook up to your backing store using one of
-the "full management" plugins, and apiplexy automatically exposes it via a portal API.
+For user/key management, just make sure that one of your backend plugins
+supports FULL user management (this is noted in the plugin docs). If so,
+apiplexy will use that plugin to expose a REST API with management functions
+(the 'portal API').
 
-Download/clone [apiplexy-portal](https://github.com/12foo/apiplexy-portal), edit index.html
-and connect it to your portal API. Instant frontend. You can write your own too, but if you
-just need to put some info up real quick, the portal comes with a built-in renderer for
-markdown pages.
+Download/clone [apiplexy-portal](https://github.com/12foo/apiplexy-portal),
+edit index.html and connect it to your portal API. Serve it on one of
+apiplexy's static paths: instant developer portal. You can write your own too,
+but if you just need to put some info up real quick, the portal comes with a
+built-in renderer for markdown pages.
 
 ## Contributing / Building
+
+Pull requests are very welcome, especially ones that allow you to hook apiplexy
+up to more things more easily. Pull requests should be accompanied by tests.
 
 ### Note on building for production
 
@@ -57,8 +73,8 @@ before you build.
 
 ### License
 
-apiplexy is licensed under MIT, with a **special restriction**: you may not sell
-apiplexy itself as a SaaS service. Meaning, you can run your own
-commercial/paid services behind apiplexy, but you can't sell apiplexy itself as
-a service to become the next 3scale/Apigee/etc. For details, see the LICENSE
-file.
+apiplexy is licensed under MIT, with a **special restriction**: you may not
+sell apiplexy itself as a SaaS service. Meaning, you can and should run your
+own commercial/paid services behind apiplexy, but you can't sell apiplexy
+itself as a service to become the next 3scale/Apigee/etc. For details, see the
+LICENSE file.
