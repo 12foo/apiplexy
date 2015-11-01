@@ -1,4 +1,4 @@
-# apiplexy
+# apiplexy ![Travis CI](https://travis-ci.org/12foo/apiplexy.svg?branch=master)
 
 An API gateway / management swiss army knife for disgruntled nerds who need
 things to work yesterday, using stuff they have already lying around.
