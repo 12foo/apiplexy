@@ -183,7 +183,7 @@ func ensureDefaults(target map[string]interface{}, defaults map[string]interface
 		defaultType := reflect.TypeOf(dv)
 		if tv, ok := target[dk]; ok {
 			if reflect.TypeOf(tv) != defaultType {
-				return fmt.Errorf("Field '%s': expected a value of type %T.", dk, dv)
+				return fmt.Errorf("Field '%s': expected a value of type %T, found %T.", dk, dv, tv)
 			}
 			defaultZero := reflect.New(defaultType)
 			if tv == defaultZero {
@@ -432,7 +432,7 @@ func New(config ApiplexConfig) (http.Handler, error) {
 		mux.Static(static, path)
 	}
 	for api, _ := range config.Serve.Backends {
-		mux.Any(api, ap.HandleAPI)
+		mux.Any(ensureSlashes(api)+"/*", ap.HandleAPI)
 	}
 	if config.Serve.PortalAPI != "" {
 		papath := ensureSlashes(config.Serve.PortalAPI)

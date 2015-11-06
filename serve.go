@@ -2,6 +2,7 @@ package apiplexy
 
 import (
 	"bytes"
+	"crypto/tls"
 	"encoding/json"
 	"fmt"
 	"github.com/garyburd/redigo/redis"
@@ -42,6 +43,9 @@ func (ap *apiplex) sendEmail(to string, subject string, contentType string, body
 	m.SetHeader("Subject", subject)
 	m.SetBody(contentType, body)
 	d := gomail.NewPlainDialer(ap.email.Server, ap.email.Port, ap.email.User, ap.email.Password)
+	if ap.email.Server == "localhost" {
+		d.TLSConfig = &tls.Config{InsecureSkipVerify: true}
+	}
 	d.DialAndSend(m)
 }
 
@@ -58,16 +62,15 @@ func (ap *apiplex) reportError(err error) {
 // nicely with an error message to the user. If called with any other error type, will throw a 500
 // and report the error through reporting.
 func (ap *apiplex) error(status int, err error, res http.ResponseWriter) {
-	switch err.(type) {
+	switch e := err.(type) {
 	case AbortRequest:
-		ar := err.(AbortRequest)
-		res.WriteHeader(ar.Status)
-		jsonError, _ := json.Marshal(&processingError{Error: err.Error()})
+		res.WriteHeader(e.Status)
+		jsonError, _ := json.Marshal(&processingError{Error: e.Error()})
 		res.Write(jsonError)
 	default:
-		ap.reportError(err)
+		ap.reportError(e)
 		res.WriteHeader(status)
-		jsonError, _ := json.Marshal(&processingError{Error: err.Error()})
+		jsonError, _ := json.Marshal(&processingError{Error: e.Error()})
 		res.Write(jsonError)
 	}
 }
@@ -117,6 +120,9 @@ func (ap *apiplex) authenticateRequest(req *http.Request, rd redis.Conn, ctx *AP
 					key, err := bend.GetKey(maybeKey, keyType)
 					if err != nil {
 						return err
+					}
+					if key == nil {
+						continue
 					}
 					ok, err := auth.Validate(key, req, ctx, bits)
 					if err != nil {
@@ -214,6 +220,23 @@ This warning will repeat every hour as long as the key continues to exceed its q
 	return nil
 }
 
+func prepLog(ctx *APIContext, req *http.Request) {
+	var clientIP string
+	if req.Header.Get("X-Forwarded-For") != "" {
+		clientIP = req.Header.Get("X-Forwarded-For")
+	} else {
+		clientIP, _, _ = net.SplitHostPort(req.RemoteAddr)
+	}
+	ctx.Log["client_ip"] = clientIP
+	ctx.Log["path"] = ctx.Path
+	ctx.Log["keyless"] = ctx.Keyless
+	if !ctx.Keyless {
+		ctx.Log["key_id"] = ctx.Key.ID
+		ctx.Log["key_realm"] = ctx.Key.Realm
+		ctx.Log["key_type"] = ctx.Key.Type
+	}
+}
+
 // HandleAPI is the main processing function. It receives a request, checks for authentication,
 // calculates quota, runs plugins and then passes the request to an upstream backend. On the
 // returned response, it again runs plugins, and then sends the (possibly modified) result
@@ -237,8 +260,6 @@ func (ap *apiplex) HandleAPI(res http.ResponseWriter, req *http.Request) {
 			}
 		}
 	}
-
-	// TODO determine actual(!) client IP address and add to ctx.Log
 
 	rd := ap.redis.Get()
 
@@ -385,13 +406,16 @@ func (ap *apiplex) HandleAPI(res http.ResponseWriter, req *http.Request) {
 	res.Write(body)
 
 	// do logging in a goroutine so the request can finish as fast as possible
-	go func() {
-		for _, logging := range ap.logging {
-			if err := logging.Log(req, urs, &ctx); err != nil {
-				ap.error(500, err, res)
-				return
+	if !ctx.DoNotLog {
+		go func() {
+			prepLog(&ctx, req)
+			for _, logging := range ap.logging {
+				if err := logging.Log(req, urs, &ctx); err != nil {
+					ap.error(500, err, res)
+					return
+				}
 			}
-		}
-	}()
+		}()
+	}
 
 }

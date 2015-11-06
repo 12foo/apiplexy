@@ -120,6 +120,7 @@ type APIContext struct {
 	Cost     int
 	Path     string
 	Upstream *APIUpstream
+	DoNotLog bool
 	Log      map[string]interface{}
 	Data     map[string]interface{}
 }

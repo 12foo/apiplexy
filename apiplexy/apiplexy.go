@@ -188,12 +188,18 @@ func start(c *cli.Context) {
 	if pidfile != "" {
 		ioutil.WriteFile(pidfile, []byte(strconv.Itoa(syscall.Getpid())), 0600)
 		sigusr := make(chan os.Signal, 1)
+		sigkill := make(chan os.Signal, 1)
 		signal.Notify(sigusr, syscall.SIGUSR1)
+		signal.Notify(sigkill, syscall.SIGINT)
 		go func() {
 			for {
-				<-sigusr
-				if err := performRestart(); err != nil {
-					fmt.Print(err.Error())
+				select {
+				case _ = <-sigusr:
+					if err := performRestart(); err != nil {
+						fmt.Print(err.Error())
+					}
+				case _ = <-sigkill:
+					break
 				}
 			}
 		}()

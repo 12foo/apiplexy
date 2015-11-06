@@ -161,6 +161,7 @@ func (p *LuaPlugin) runScript(req *http.Request, ctx *apiplexy.APIContext) error
 	newctx := popMap(L)
 
 	ctx.Cost = newctx["cost"].(int)
+	ctx.DoNotLog = newctx["donotlog"].(bool)
 	ctx.Data = newctx["data"].(map[string]interface{})
 	ctx.Log = newctx["log"].(map[string]interface{})
 

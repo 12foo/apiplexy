@@ -12,13 +12,12 @@ import (
 type InfluxDBLoggingPlugin struct {
 	url           string
 	measurement   string
+	stop          chan bool
 	lines         chan string
 	flushInterval time.Duration
 }
 
 func (ix *InfluxDBLoggingPlugin) Log(req *http.Request, res *http.Response, ctx *apiplexy.APIContext) error {
-	// TODO log more types
-	// TODO map log key names to storeable keys / types in config?
 	fields := []string{}
 	for k, v := range ctx.Log {
 		log := ""
@@ -52,6 +51,7 @@ func (ix *InfluxDBLoggingPlugin) Configure(config map[string]interface{}) error 
 	ix.url = "http://" + config["server"].(string) + "/write?db=" + config["database"].(string)
 	ix.measurement = config["measurement"].(string)
 	ix.lines = make(chan string, 100)
+	ix.stop = make(chan bool, 1)
 	ix.flushInterval = time.Duration(config["flush_interval"].(int)) * time.Second
 
 	return nil
@@ -62,10 +62,7 @@ func (ix *InfluxDBLoggingPlugin) Start(report func(error)) error {
 	go func() {
 		lines := []string{}
 
-		select {
-		case line := <-ix.lines:
-			lines = append(lines, line)
-		case _ = <-flush:
+		performFlush := func() {
 			res, err := http.Post(ix.url, "text/plain", strings.NewReader(strings.Join(lines, "\n")))
 			if err != nil {
 				report(err)
@@ -75,11 +72,26 @@ func (ix *InfluxDBLoggingPlugin) Start(report func(error)) error {
 			}
 			lines = nil
 		}
+
+		for {
+			select {
+			case line := <-ix.lines:
+				lines = append(lines, line)
+			case _ = <-ix.stop:
+				performFlush()
+				break
+			case _ = <-flush:
+				performFlush()
+			}
+		}
 	}()
+	close(ix.stop)
+	close(ix.lines)
 	return nil
 }
 
 func (ix *InfluxDBLoggingPlugin) Stop() error {
+	ix.stop <- true
 	return nil
 }
 
