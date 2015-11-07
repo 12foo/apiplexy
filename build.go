@@ -199,27 +199,27 @@ func ensureDefaults(target map[string]interface{}, defaults map[string]interface
 // A little black magic here: buildPlugins uses reflection to reify and configure
 // actual working plugins from zero-value references. The plugins are also reflect-
 // typechecked so we don't run into nasty surprises later.
-func buildPlugins(plugins []apiplexPluginConfig, pluginType reflect.Type, startables []LifecyclePlugin) ([]interface{}, error) {
+func buildPlugins(plugins []apiplexPluginConfig, pluginType reflect.Type, startables []LifecyclePlugin) ([]interface{}, []LifecyclePlugin, error) {
 	built := make([]interface{}, len(plugins))
 	for i, config := range plugins {
 		ptype, ok := registeredPlugins[config.Plugin]
 		if !ok {
-			return nil, fmt.Errorf("No plugin named '%s' available.", config.Plugin)
+			return nil, startables, fmt.Errorf("No plugin named '%s' available.", config.Plugin)
 		}
 		pt := reflect.New(ptype.pluginType)
 
 		if !pt.Type().Implements(pluginType) {
-			return nil, fmt.Errorf("Plugin '%s' (%s) cannot be loaded as %s.", config.Plugin, ptype.pluginType.Name(), pluginType.Name())
+			return nil, startables, fmt.Errorf("Plugin '%s' (%s) cannot be loaded as %s.", config.Plugin, ptype.pluginType.Name(), pluginType.Name())
 		}
 
 		defConfig := pt.MethodByName("DefaultConfig").Call([]reflect.Value{})[0].Interface().(map[string]interface{})
 		if err := ensureDefaults(config.Config, defConfig); err != nil {
-			return nil, fmt.Errorf("While configuring '%s': %s", config.Plugin, err.Error())
+			return nil, startables, fmt.Errorf("While configuring '%s': %s", config.Plugin, err.Error())
 		}
 		maybeErr := pt.MethodByName("Configure").Call([]reflect.Value{reflect.ValueOf(config.Config)})[0].Interface()
 		if maybeErr != nil {
 			err := maybeErr.(error)
-			return nil, fmt.Errorf("While configuring '%s': %s", config.Plugin, err.Error())
+			return nil, startables, fmt.Errorf("While configuring '%s': %s", config.Plugin, err.Error())
 		}
 
 		st := pt.Interface()
@@ -230,7 +230,7 @@ func buildPlugins(plugins []apiplexPluginConfig, pluginType reflect.Type, starta
 			startables = append(startables, lt)
 		}
 	}
-	return built, nil
+	return built, startables, nil
 }
 
 // Helper method so all HTTP paths in the configuration have a final slash
@@ -279,10 +279,10 @@ func buildApiplex(config ApiplexConfig) (*apiplex, error) {
 
 	// this slice will contain all plugins that implement LifecyclePlugin after all plugins
 	// are configured
-	ap.startables = []LifecyclePlugin{}
+	startables := []LifecyclePlugin{}
 
 	// auth plugins
-	auth, err := buildPlugins(config.Plugins.Auth, reflect.TypeOf((*AuthPlugin)(nil)).Elem(), ap.startables)
+	auth, startables, err := buildPlugins(config.Plugins.Auth, reflect.TypeOf((*AuthPlugin)(nil)).Elem(), startables)
 	if err != nil {
 		return nil, err
 	}
@@ -293,7 +293,7 @@ func buildApiplex(config ApiplexConfig) (*apiplex, error) {
 	}
 
 	// backend plugins
-	backend, err := buildPlugins(config.Plugins.Backend, reflect.TypeOf((*BackendPlugin)(nil)).Elem(), ap.startables)
+	backend, startables, err := buildPlugins(config.Plugins.Backend, reflect.TypeOf((*BackendPlugin)(nil)).Elem(), startables)
 	if err != nil {
 		return nil, err
 	}
@@ -317,7 +317,7 @@ func buildApiplex(config ApiplexConfig) (*apiplex, error) {
 	}
 
 	// postauth plugins
-	postauth, err := buildPlugins(config.Plugins.PostAuth, reflect.TypeOf((*PostAuthPlugin)(nil)).Elem(), ap.startables)
+	postauth, startables, err := buildPlugins(config.Plugins.PostAuth, reflect.TypeOf((*PostAuthPlugin)(nil)).Elem(), startables)
 	if err != nil {
 		return nil, err
 	}
@@ -328,7 +328,7 @@ func buildApiplex(config ApiplexConfig) (*apiplex, error) {
 	}
 
 	// preupstream plugins
-	preupstream, err := buildPlugins(config.Plugins.PreUpstream, reflect.TypeOf((*PreUpstreamPlugin)(nil)).Elem(), ap.startables)
+	preupstream, startables, err := buildPlugins(config.Plugins.PreUpstream, reflect.TypeOf((*PreUpstreamPlugin)(nil)).Elem(), startables)
 	if err != nil {
 		return nil, err
 	}
@@ -339,7 +339,7 @@ func buildApiplex(config ApiplexConfig) (*apiplex, error) {
 	}
 
 	// postupstream plugins
-	postupstream, err := buildPlugins(config.Plugins.PostUpstream, reflect.TypeOf((*PostUpstreamPlugin)(nil)).Elem(), ap.startables)
+	postupstream, startables, err := buildPlugins(config.Plugins.PostUpstream, reflect.TypeOf((*PostUpstreamPlugin)(nil)).Elem(), startables)
 	if err != nil {
 		return nil, err
 	}
@@ -350,7 +350,7 @@ func buildApiplex(config ApiplexConfig) (*apiplex, error) {
 	}
 
 	// logging plugins
-	logging, err := buildPlugins(config.Plugins.Logging, reflect.TypeOf((*LoggingPlugin)(nil)).Elem(), ap.startables)
+	logging, startables, err := buildPlugins(config.Plugins.Logging, reflect.TypeOf((*LoggingPlugin)(nil)).Elem(), startables)
 	if err != nil {
 		return nil, err
 	}
@@ -402,6 +402,7 @@ func buildApiplex(config ApiplexConfig) (*apiplex, error) {
 		log.Fatalf("Couldn't connect to Redis. %s", err.Error())
 	}
 
+	ap.startables = startables
 	for _, st := range ap.startables {
 		err := st.Start(ap.reportError)
 		if err != nil {

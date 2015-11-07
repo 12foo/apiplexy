@@ -244,10 +244,11 @@ func prepLog(ctx *APIContext, req *http.Request) {
 // goroutine.
 func (ap *apiplex) HandleAPI(res http.ResponseWriter, req *http.Request) {
 	ctx := APIContext{
-		Keyless: false,
-		Cost:    1,
-		Log:     make(map[string]interface{}),
-		Data:    make(map[string]interface{}),
+		Keyless:  false,
+		DoNotLog: false,
+		Cost:     1,
+		Log:      make(map[string]interface{}),
+		Data:     make(map[string]interface{}),
 	}
 	var apipath string
 	for path, backends := range ap.upstreams {
@@ -352,7 +353,6 @@ func (ap *apiplex) HandleAPI(res http.ResponseWriter, req *http.Request) {
 		if len(ap.email.AlertsTo) > 0 && (ap.lastAlert == nil || time.Since(*ap.lastAlert) > time.Duration(ap.email.AlertsCooldown)*time.Minute) {
 			now := time.Now()
 			ap.lastAlert = &now
-			m := gomail.NewMessage()
 			subject := "[API Error] Upstream server error"
 
 			type detail struct {
@@ -386,9 +386,6 @@ func (ap *apiplex) HandleAPI(res http.ResponseWriter, req *http.Request) {
 			} else {
 				ap.sendEmail("alerts", subject, "text/html", ebody+"<pre>"+string(body)+"</pre>")
 			}
-
-			d := gomail.NewPlainDialer(ap.email.Server, ap.email.Port, ap.email.User, ap.email.Password)
-			d.DialAndSend(m)
 		}
 
 		msg := map[string]interface{}{
@@ -407,15 +404,13 @@ func (ap *apiplex) HandleAPI(res http.ResponseWriter, req *http.Request) {
 
 	// do logging in a goroutine so the request can finish as fast as possible
 	if !ctx.DoNotLog {
-		go func() {
-			prepLog(&ctx, req)
-			for _, logging := range ap.logging {
-				if err := logging.Log(req, urs, &ctx); err != nil {
-					ap.error(500, err, res)
-					return
-				}
+		prepLog(&ctx, req)
+		for _, logging := range ap.logging {
+			if err := logging.Log(req, urs, &ctx); err != nil {
+				ap.error(500, err, res)
+				return
 			}
-		}()
+		}
 	}
 
 }
