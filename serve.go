@@ -227,6 +227,7 @@ func prepLog(ctx *APIContext, req *http.Request) {
 	} else {
 		clientIP, _, _ = net.SplitHostPort(req.RemoteAddr)
 	}
+	clientIP = strings.TrimSpace(strings.Split(clientIP, ",")[0])
 	ctx.Log["client_ip"] = clientIP
 	ctx.Log["path"] = ctx.Path
 	ctx.Log["keyless"] = ctx.Keyless
@@ -247,13 +248,13 @@ func (ap *apiplex) HandleAPI(res http.ResponseWriter, req *http.Request) {
 		Keyless:  false,
 		DoNotLog: false,
 		Cost:     1,
+		Path:     req.URL.Path,
 		Log:      make(map[string]interface{}),
 		Data:     make(map[string]interface{}),
 	}
-	var apipath string
 	for path, backends := range ap.upstreams {
 		if strings.HasPrefix(req.URL.Path, path) {
-			apipath = path
+			ctx.APIPath = path
 			if len(backends) == 1 {
 				ctx.Upstream = &backends[0]
 			} else {
@@ -299,7 +300,7 @@ func (ap *apiplex) HandleAPI(res http.ResponseWriter, req *http.Request) {
 
 	outreq.URL.Scheme = ctx.Upstream.Address.Scheme
 	outreq.URL.Host = ctx.Upstream.Address.Host
-	outreq.URL.Path = strings.Replace(outreq.URL.Path, apipath, ctx.Upstream.Address.Path, 1)
+	outreq.URL.Path = strings.Replace(outreq.URL.Path, ctx.APIPath, ctx.Upstream.Address.Path, 1)
 	outreq.RequestURI = ""
 	outreq.Close = false
 
@@ -404,13 +405,15 @@ func (ap *apiplex) HandleAPI(res http.ResponseWriter, req *http.Request) {
 
 	// do logging in a goroutine so the request can finish as fast as possible
 	if !ctx.DoNotLog {
-		prepLog(&ctx, req)
-		for _, logging := range ap.logging {
-			if err := logging.Log(req, urs, &ctx); err != nil {
-				ap.error(500, err, res)
-				return
+		go func() {
+			prepLog(&ctx, req)
+			for _, logging := range ap.logging {
+				if err := logging.Log(req, urs, &ctx); err != nil {
+					ap.error(500, err, res)
+					return
+				}
 			}
-		}
+		}()
 	}
 
 }

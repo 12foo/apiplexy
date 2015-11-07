@@ -121,6 +121,7 @@ type APIContext struct {
 	Path     string
 	Upstream *APIUpstream
 	DoNotLog bool
+	APIPath  string
 	Log      map[string]interface{}
 	Data     map[string]interface{}
 }
