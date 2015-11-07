@@ -1,40 +1,29 @@
 package logging
 
 import (
-	"fmt"
 	"github.com/12foo/apiplexy"
 	"net/http"
-	"strconv"
-	"strings"
+	"net/url"
 	"time"
+
+	"github.com/influxdb/influxdb/client/v2"
 )
 
 type InfluxDBLoggingPlugin struct {
-	url           string
+	client        client.Client
+	batchConfig   client.BatchPointsConfig
 	measurement   string
-	stop          chan bool
-	lines         chan string
+	done          chan bool
+	points        chan *client.Point
 	flushInterval time.Duration
 }
 
 func (ix *InfluxDBLoggingPlugin) Log(req *http.Request, res *http.Response, ctx *apiplexy.APIContext) error {
-	fields := []string{}
-	for k, v := range ctx.Log {
-		log := ""
-		switch t := v.(type) {
-		case string:
-			log = "\"" + strings.Replace(t, "\"", "\\\"", -1) + "\""
-		case int:
-			log = strconv.Itoa(t) + "i"
-		case float64:
-			log = strconv.FormatFloat(t, 'e', -1, 64)
-		}
-		if log != "" {
-			fields = append(fields, k+"="+log)
-		}
+	point, err := client.NewPoint(ix.measurement, map[string]string{}, ctx.Log, time.Now())
+	if err != nil {
+		return err
 	}
-	line := fmt.Sprintf("%s %s %d", ix.measurement, strings.Join(fields, ","), time.Now().UnixNano())
-	ix.lines <- line
+	ix.points <- point
 	return nil
 }
 
@@ -42,56 +31,75 @@ func (ix *InfluxDBLoggingPlugin) DefaultConfig() map[string]interface{} {
 	return map[string]interface{}{
 		"database":       "your-db-name",
 		"measurement":    "api_hits",
-		"server":         "localhost:8086",
+		"server":         "http://localhost:8086",
 		"flush_interval": 30,
+		"username":       "",
+		"password":       "",
 	}
 }
 
 func (ix *InfluxDBLoggingPlugin) Configure(config map[string]interface{}) error {
-	ix.url = "http://" + config["server"].(string) + "/write?db=" + config["database"].(string)
-	ix.measurement = config["measurement"].(string)
-	ix.lines = make(chan string, 100)
-	ix.stop = make(chan bool, 1)
-	ix.flushInterval = time.Duration(config["flush_interval"].(int)) * time.Second
+	u, _ := url.Parse(config["server"].(string))
+	cfg := client.Config{
+		URL: u,
+	}
+	if _, ok := config["username"]; ok {
+		cfg.Username = config["username"].(string)
+		cfg.Password = config["password"].(string)
+	}
+	ix.client = client.NewClient(cfg)
 
+	ix.batchConfig = client.BatchPointsConfig{
+		Database:  config["database"].(string),
+		Precision: "s",
+	}
+
+	ix.points = make(chan *client.Point, 100)
+	ix.done = make(chan bool)
+	ix.flushInterval = time.Duration(config["flush_interval"].(int)) * time.Second
 	return nil
 }
 
 func (ix *InfluxDBLoggingPlugin) Start(report func(error)) error {
 	flush := time.Tick(ix.flushInterval)
 	go func() {
-		lines := []string{}
+		batch, err := client.NewBatchPoints(ix.batchConfig)
+		if err != nil {
+			report(err)
+		}
 
 		performFlush := func() {
-			res, err := http.Post(ix.url, "text/plain", strings.NewReader(strings.Join(lines, "\n")))
+			ix.client.Write(batch)
+			batch, err = client.NewBatchPoints(ix.batchConfig)
 			if err != nil {
 				report(err)
 			}
-			if res.StatusCode != 204 {
-				report(fmt.Errorf("Error logging to InfluxDB. HTTP status code: %d", res.StatusCode))
-			}
-			lines = nil
 		}
 
 		for {
 			select {
-			case line := <-ix.lines:
-				lines = append(lines, line)
-			case _ = <-ix.stop:
-				performFlush()
-				break
+			case point, ok := <-ix.points:
+				if ok {
+					batch.AddPoint(point)
+				} else {
+					ix.points = nil
+				}
 			case _ = <-flush:
 				performFlush()
 			}
+			if ix.points == nil || flush == nil {
+				performFlush()
+				break
+			}
 		}
+		ix.done <- true
 	}()
-	close(ix.stop)
-	close(ix.lines)
 	return nil
 }
 
 func (ix *InfluxDBLoggingPlugin) Stop() error {
-	ix.stop <- true
+	close(ix.points)
+	<-ix.done
 	return nil
 }
 
