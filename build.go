@@ -428,11 +428,17 @@ func New(config ApiplexConfig) (http.Handler, error) {
 	}
 
 	mux := echo.New()
+	mux.SetDebug(true)
 	for static, path := range config.Serve.Static {
 		mux.Static(static, path)
 	}
 	for api, _ := range config.Serve.Backends {
-		mux.Any(ensureSlashes(api)+"/*", ap.HandleAPI)
+		// double-check this since if someone puts an API backend on / it becomes //
+		rpath := ensureSlashes(api)
+		if rpath == "/" {
+			rpath = ""
+		}
+		mux.Any(rpath+"/*", ap.HandleAPI)
 	}
 	if config.Serve.PortalAPI != "" {
 		papath := ensureSlashes(config.Serve.PortalAPI)
