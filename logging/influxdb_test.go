@@ -33,6 +33,7 @@ var config map[string]interface{} = map[string]interface{}{
 	"flush_interval": 3,
 	"username":       "",
 	"password":       "",
+	"tags":           "",
 }
 
 var mockInflux *httptest.Server

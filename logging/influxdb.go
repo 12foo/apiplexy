@@ -1,9 +1,11 @@
 package logging
 
 import (
+	"fmt"
 	"github.com/12foo/apiplexy"
 	"net/http"
 	"net/url"
+	"strings"
 	"time"
 
 	"github.com/influxdb/influxdb/client/v2"
@@ -14,12 +16,31 @@ type InfluxDBLoggingPlugin struct {
 	batchConfig   client.BatchPointsConfig
 	measurement   string
 	done          chan bool
+	tags          map[string]bool
 	points        chan *client.Point
 	flushInterval time.Duration
 }
 
 func (ix *InfluxDBLoggingPlugin) Log(req *http.Request, res *http.Response, ctx *apiplexy.APIContext) error {
-	point, err := client.NewPoint(ix.measurement, map[string]string{}, ctx.Log, time.Now())
+	tags := make(map[string]string, len(ix.tags)+1)
+	fields := map[string]interface{}{}
+	tags["apipath"] = ctx.APIPath
+	if ctx.Keyless || ctx.Key == nil {
+		tags["key"] = "none"
+	} else {
+		tags["key"] = ctx.Key.ID
+	}
+
+	for k, v := range ctx.Log {
+		if _, ok := ix.tags[k]; ok {
+			if _, ok := v.(string); ok {
+				tags[k] = v.(string)
+			}
+		} else {
+			fields[k] = v
+		}
+	}
+	point, err := client.NewPoint(ix.measurement, tags, fields, time.Now())
 	if err != nil {
 		return err
 	}
@@ -35,11 +56,22 @@ func (ix *InfluxDBLoggingPlugin) DefaultConfig() map[string]interface{} {
 		"flush_interval": 30,
 		"username":       "",
 		"password":       "",
+		"tags":           "",
 	}
 }
 
 func (ix *InfluxDBLoggingPlugin) Configure(config map[string]interface{}) error {
+	ix.measurement = config["measurement"].(string)
+	if len(ix.measurement) == 0 {
+		return fmt.Errorf("Measurement name cannot be an empty string.")
+	}
 	u, _ := url.Parse(config["server"].(string))
+	rawtags := strings.Split(config["tags"].(string), ",")
+	ix.tags = make(map[string]bool, len(rawtags))
+	for _, tag := range rawtags {
+		ix.tags[strings.TrimSpace(tag)] = true
+	}
+
 	cfg := client.Config{
 		URL: u,
 	}
@@ -60,20 +92,20 @@ func (ix *InfluxDBLoggingPlugin) Configure(config map[string]interface{}) error 
 	return nil
 }
 
+func (ix *InfluxDBLoggingPlugin) performFlush(batch *client.BatchPoints) error {
+	err := ix.client.Write(*batch)
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
 func (ix *InfluxDBLoggingPlugin) Start(report func(error)) error {
 	flush := time.Tick(ix.flushInterval)
 	go func() {
 		batch, err := client.NewBatchPoints(ix.batchConfig)
 		if err != nil {
 			report(err)
-		}
-
-		performFlush := func() {
-			ix.client.Write(batch)
-			batch, err = client.NewBatchPoints(ix.batchConfig)
-			if err != nil {
-				report(err)
-			}
 		}
 
 		for {
@@ -85,10 +117,16 @@ func (ix *InfluxDBLoggingPlugin) Start(report func(error)) error {
 					ix.points = nil
 				}
 			case _ = <-flush:
-				performFlush()
+				if err := ix.performFlush(&batch); err != nil {
+					report(err)
+				}
+				batch, _ = client.NewBatchPoints(ix.batchConfig)
 			}
 			if ix.points == nil || flush == nil {
-				performFlush()
+				if err := ix.performFlush(&batch); err != nil {
+					report(err)
+				}
+				batch, _ = client.NewBatchPoints(ix.batchConfig)
 				break
 			}
 		}
@@ -100,6 +138,7 @@ func (ix *InfluxDBLoggingPlugin) Start(report func(error)) error {
 func (ix *InfluxDBLoggingPlugin) Stop() error {
 	close(ix.points)
 	<-ix.done
+	ix.client.Close()
 	return nil
 }
 
