@@ -218,6 +218,7 @@ func prepLog(ctx *APIContext, req *http.Request) {
 	ctx.Log["client_ip"] = ctx.ClientIP
 	ctx.Log["path"] = ctx.Path
 	ctx.Log["keyless"] = ctx.Keyless
+	ctx.Log["referrer"] = req.Referer()
 	if !ctx.Keyless {
 		ctx.Log["key"] = ctx.Key.ID
 		ctx.Log["key_realm"] = ctx.Key.Realm
