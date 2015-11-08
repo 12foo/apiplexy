@@ -324,6 +324,7 @@ func (ap *apiplex) upstreamRequest(req *http.Request, ctx *APIContext) (*http.Re
 // back to the user. After the request is thus handled, logging plugins are run in a background
 // goroutine.
 func (ap *apiplex) HandleAPI(res http.ResponseWriter, req *http.Request) {
+	requestStart := time.Now()
 	ctx := APIContext{
 		Keyless:  false,
 		DoNotLog: false,
@@ -375,6 +376,7 @@ func (ap *apiplex) HandleAPI(res http.ResponseWriter, req *http.Request) {
 	}
 
 	// upstream
+	upstreamStart := time.Now()
 	urs, err := ap.upstreamRequest(req, &ctx)
 	if err != nil {
 		ap.error(500, err, res)
@@ -417,6 +419,9 @@ func (ap *apiplex) HandleAPI(res http.ResponseWriter, req *http.Request) {
 
 	// do logging in a goroutine so the request can finish as fast as possible
 	if !ctx.DoNotLog {
+		ctx.Log["status"] = urs.StatusCode
+		ctx.Log["time_api"] = time.Since(upstreamStart).Nanoseconds()
+		ctx.Log["time_total"] = time.Since(requestStart).Nanoseconds()
 		go func() {
 			prepLog(&ctx, req)
 			for _, logging := range ap.logging {
