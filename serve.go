@@ -187,13 +187,7 @@ func (ap *apiplex) checkQuota(rd redis.Conn, req *http.Request, ctx *APIContext)
 		return nil
 	}
 	if quota.MaxIP > 0 {
-		var clientIP string
-		if req.Header.Get("X-Forwarded-For") != "" {
-			clientIP = req.Header.Get("X-Forwarded-For")
-		} else {
-			clientIP, _, _ = net.SplitHostPort(req.RemoteAddr)
-		}
-		if ap.overQuota(rd, "quota:ip:"+keyID+":"+clientIP, ctx.Cost, quota.MaxIP, quota.Minutes) {
+		if ap.overQuota(rd, "quota:ip:"+keyID+":"+ctx.ClientIP, ctx.Cost, quota.MaxIP, quota.Minutes) {
 			return Abort(403, fmt.Sprintf("Request quota per IP exceeded (%d reqs / %d mins). Please wait before making new requests.", quota.MaxIP, quota.Minutes))
 		}
 	}
@@ -221,14 +215,7 @@ This warning will repeat every hour as long as the key continues to exceed its q
 }
 
 func prepLog(ctx *APIContext, req *http.Request) {
-	var clientIP string
-	if req.Header.Get("X-Forwarded-For") != "" {
-		clientIP = req.Header.Get("X-Forwarded-For")
-	} else {
-		clientIP, _, _ = net.SplitHostPort(req.RemoteAddr)
-	}
-	clientIP = strings.TrimSpace(strings.Split(clientIP, ",")[0])
-	ctx.Log["client_ip"] = clientIP
+	ctx.Log["client_ip"] = ctx.ClientIP
 	ctx.Log["path"] = ctx.Path
 	ctx.Log["keyless"] = ctx.Keyless
 	if !ctx.Keyless {
@@ -295,6 +282,7 @@ func (ap *apiplex) upstreamRequest(req *http.Request, ctx *APIContext) (*http.Re
 	for _, h := range hopHeaders {
 		outreq.Header.Del(h)
 	}
+	// do not use ctx.ClientIP here (preserve forward chain)
 	if clientIP, _, err := net.SplitHostPort(req.RemoteAddr); err == nil {
 		if prior, ok := outreq.Header["X-Forwarded-For"]; ok {
 			clientIP = strings.Join(prior, ", ") + ", " + clientIP
@@ -335,6 +323,16 @@ func (ap *apiplex) HandleAPI(res http.ResponseWriter, req *http.Request) {
 		Log:      make(map[string]interface{}),
 		Data:     make(map[string]interface{}),
 	}
+
+	var clientIP string
+	if req.Header.Get("X-Forwarded-For") != "" {
+		clientIP = req.Header.Get("X-Forwarded-For")
+	} else {
+		clientIP, _, _ = net.SplitHostPort(req.RemoteAddr)
+	}
+	clientIP = strings.TrimSpace(strings.Split(clientIP, ",")[0])
+	ctx.ClientIP = clientIP
+
 	for path, backends := range ap.upstreams {
 		if strings.HasPrefix(req.URL.Path, path) {
 			ctx.APIPath = path

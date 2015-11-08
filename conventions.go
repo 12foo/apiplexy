@@ -122,6 +122,7 @@ type APIContext struct {
 	Upstream *APIUpstream
 	DoNotLog bool
 	APIPath  string
+	ClientIP string
 	Log      map[string]interface{}
 	Data     map[string]interface{}
 }
