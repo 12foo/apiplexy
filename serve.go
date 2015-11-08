@@ -238,6 +238,86 @@ func prepLog(ctx *APIContext, req *http.Request) {
 	}
 }
 
+func (ap *apiplex) reportUpstreamError(body []byte, req *http.Request, urs *http.Response, ctx *APIContext) {
+	if len(ap.email.AlertsTo) > 0 && (ap.lastAlert == nil || time.Since(*ap.lastAlert) > time.Duration(ap.email.AlertsCooldown)*time.Minute) {
+		now := time.Now()
+		ap.lastAlert = &now
+		subject := "[API Error] Upstream server error"
+
+		type detail struct {
+			Item  string
+			Value string
+		}
+		details := []detail{
+			{"Code", fmt.Sprintf("%d - %s", urs.StatusCode, urs.Status)},
+			{"Backend Server", ctx.Upstream.Address.String()},
+			{"Method", req.Method},
+			{"Request URI", req.RequestURI},
+		}
+		if !ctx.Keyless {
+			details = append(details, detail{"Key ID", ctx.Key.ID})
+		}
+		if req.Method == "POST" {
+			b, _ := ioutil.ReadAll(req.Body)
+			details = append(details, detail{"Request Body", string(b)})
+		}
+
+		ebody := ""
+		ebody = ebody + fmt.Sprintf("<h2>%s</h2>", "Upstream server error")
+		ebody = ebody + "<table>"
+		for _, d := range details {
+			ebody = ebody + fmt.Sprintf("<tr><th>%s</th><td>%s</td></tr>", d.Item, d.Value)
+		}
+		ebody = ebody + "</table><hr>"
+
+		if strings.HasPrefix(urs.Header.Get("Content-Type"), "text/html") {
+			ap.sendEmail("alerts", subject, "text/html", ebody+string(body))
+		} else {
+			ap.sendEmail("alerts", subject, "text/html", ebody+"<pre>"+string(body)+"</pre>")
+		}
+	}
+}
+
+func (ap *apiplex) upstreamRequest(req *http.Request, ctx *APIContext) (*http.Response, error) {
+	// prepare request for backend
+	outreq := new(http.Request)
+	*outreq = *req
+
+	outreq.URL.Scheme = ctx.Upstream.Address.Scheme
+	outreq.URL.Host = ctx.Upstream.Address.Host
+	outreq.URL.Path = strings.Replace(outreq.URL.Path, ctx.APIPath, ctx.Upstream.Address.Path, 1)
+	outreq.RequestURI = ""
+	outreq.Close = false
+
+	// TODO golang reverseproxy does something more elaborate here, find out why
+	for _, h := range hopHeaders {
+		outreq.Header.Del(h)
+	}
+	if clientIP, _, err := net.SplitHostPort(req.RemoteAddr); err == nil {
+		if prior, ok := outreq.Header["X-Forwarded-For"]; ok {
+			clientIP = strings.Join(prior, ", ") + ", " + clientIP
+		}
+		outreq.Header.Set("X-Forwarded-For", clientIP)
+	}
+
+	urs, err := ctx.Upstream.Client.Do(outreq)
+	if err != nil {
+		return nil, err
+	}
+	b, err := ioutil.ReadAll(urs.Body)
+	if err != nil {
+		return nil, err
+	}
+	urs.Body.Close()
+	urs.Body = ioutil.NopCloser(bytes.NewReader(b))
+
+	// clean up reqponse for processing
+	for _, h := range hopHeaders {
+		urs.Header.Del(h)
+	}
+	return urs, nil
+}
+
 // HandleAPI is the main processing function. It receives a request, checks for authentication,
 // calculates quota, runs plugins and then passes the request to an upstream backend. On the
 // returned response, it again runs plugins, and then sends the (possibly modified) result
@@ -294,44 +374,13 @@ func (ap *apiplex) HandleAPI(res http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	// prepare request for backend
-	outreq := new(http.Request)
-	*outreq = *req
-
-	outreq.URL.Scheme = ctx.Upstream.Address.Scheme
-	outreq.URL.Host = ctx.Upstream.Address.Host
-	outreq.URL.Path = strings.Replace(outreq.URL.Path, ctx.APIPath, ctx.Upstream.Address.Path, 1)
-	outreq.RequestURI = ""
-	outreq.Close = false
-
-	// TODO golang reverseproxy does something more elaborate here, find out why
-	for _, h := range hopHeaders {
-		outreq.Header.Del(h)
-	}
-	if clientIP, _, err := net.SplitHostPort(req.RemoteAddr); err == nil {
-		if prior, ok := outreq.Header["X-Forwarded-For"]; ok {
-			clientIP = strings.Join(prior, ", ") + ", " + clientIP
-		}
-		outreq.Header.Set("X-Forwarded-For", clientIP)
-	}
-
-	urs, err := ctx.Upstream.Client.Do(outreq)
+	// upstream
+	urs, err := ap.upstreamRequest(req, &ctx)
 	if err != nil {
 		ap.error(500, err, res)
 		return
 	}
-	b, err := ioutil.ReadAll(urs.Body)
-	if err != nil {
-		ap.error(500, err, res)
-		return
-	}
-	urs.Body.Close()
-	urs.Body = ioutil.NopCloser(bytes.NewReader(b))
 
-	// clean up reqponse for processing
-	for _, h := range hopHeaders {
-		urs.Header.Del(h)
-	}
 	for k, vv := range urs.Header {
 		for _, v := range vv {
 			res.Header().Add(k, v)
@@ -351,44 +400,7 @@ func (ap *apiplex) HandleAPI(res http.ResponseWriter, req *http.Request) {
 
 	// if something seriously went wrong on the backend, report
 	if urs.StatusCode >= 500 {
-		if len(ap.email.AlertsTo) > 0 && (ap.lastAlert == nil || time.Since(*ap.lastAlert) > time.Duration(ap.email.AlertsCooldown)*time.Minute) {
-			now := time.Now()
-			ap.lastAlert = &now
-			subject := "[API Error] Upstream server error"
-
-			type detail struct {
-				Item  string
-				Value string
-			}
-			details := []detail{
-				{"Code", fmt.Sprintf("%d - %s", urs.StatusCode, urs.Status)},
-				{"Backend Server", ctx.Upstream.Address.String()},
-				{"Method", req.Method},
-				{"Request URI", req.RequestURI},
-			}
-			if !ctx.Keyless {
-				details = append(details, detail{"Key ID", ctx.Key.ID})
-			}
-			if req.Method == "POST" {
-				b, _ := ioutil.ReadAll(req.Body)
-				details = append(details, detail{"Request Body", string(b)})
-			}
-
-			ebody := ""
-			ebody = ebody + fmt.Sprintf("<h2>%s</h2>", "Upstream server error")
-			ebody = ebody + "<table>"
-			for _, d := range details {
-				ebody = ebody + fmt.Sprintf("<tr><th>%s</th><td>%s</td></tr>", d.Item, d.Value)
-			}
-			ebody = ebody + "</table><hr>"
-
-			if strings.HasPrefix(urs.Header.Get("Content-Type"), "text/html") {
-				ap.sendEmail("alerts", subject, "text/html", ebody+string(body))
-			} else {
-				ap.sendEmail("alerts", subject, "text/html", ebody+"<pre>"+string(body)+"</pre>")
-			}
-		}
-
+		ap.reportUpstreamError(body, req, urs, &ctx)
 		msg := map[string]interface{}{
 			"error":   "Internal API error",
 			"details": "Sorry, something went wrong on the API server. The error has been reported to technical staff.",
