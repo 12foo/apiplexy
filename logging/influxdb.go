@@ -25,11 +25,6 @@ func (ix *InfluxDBLoggingPlugin) Log(req *http.Request, res *http.Response, ctx 
 	tags := make(map[string]string, len(ix.tags)+1)
 	fields := map[string]interface{}{}
 	tags["apipath"] = ctx.APIPath
-	if ctx.Keyless || ctx.Key == nil {
-		tags["key"] = "none"
-	} else {
-		tags["key"] = ctx.Key.ID
-	}
 
 	for k, v := range ctx.Log {
 		if _, ok := ix.tags[k]; ok {

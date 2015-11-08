@@ -232,9 +232,11 @@ func prepLog(ctx *APIContext, req *http.Request) {
 	ctx.Log["path"] = ctx.Path
 	ctx.Log["keyless"] = ctx.Keyless
 	if !ctx.Keyless {
-		ctx.Log["key_id"] = ctx.Key.ID
+		ctx.Log["key"] = ctx.Key.ID
 		ctx.Log["key_realm"] = ctx.Key.Realm
 		ctx.Log["key_type"] = ctx.Key.Type
+	} else {
+		ctx.Log["key"] = ""
 	}
 }
 
