@@ -22,9 +22,14 @@ type InfluxDBLoggingPlugin struct {
 }
 
 func (ix *InfluxDBLoggingPlugin) Log(req *http.Request, res *http.Response, ctx *apiplexy.APIContext) error {
-	tags := make(map[string]string, len(ix.tags)+1)
+	tags := make(map[string]string, len(ix.tags)+2)
 	fields := map[string]interface{}{}
-	tags["apipath"] = ctx.APIPath
+	tags["api_path"] = ctx.APIPath
+	if !ctx.Keyless && ctx.Key != nil {
+		tags["key"] = ctx.Key.ID
+	} else {
+		tags["key"] = ""
+	}
 
 	for k, v := range ctx.Log {
 		if _, ok := ix.tags[k]; ok {

@@ -217,6 +217,7 @@ This warning will repeat every hour as long as the key continues to exceed its q
 func prepLog(ctx *APIContext, req *http.Request) {
 	ctx.Log["client_ip"] = ctx.ClientIP
 	ctx.Log["path"] = ctx.Path
+	ctx.Log["api_path"] = ctx.APIPath
 	ctx.Log["keyless"] = ctx.Keyless
 	ctx.Log["referrer"] = req.Referer()
 	if !ctx.Keyless {
