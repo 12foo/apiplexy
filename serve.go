@@ -316,6 +316,12 @@ func (ap *apiplex) upstreamRequest(req *http.Request, ctx *APIContext) (*http.Re
 // back to the user. After the request is thus handled, logging plugins are run in a background
 // goroutine.
 func (ap *apiplex) HandleAPI(res http.ResponseWriter, req *http.Request) {
+	defer func() {
+		if err := recover(); err != nil {
+			ap.reportError(err)
+		}
+	}()
+
 	requestStart := time.Now()
 	ctx := APIContext{
 		Keyless:  false,
