@@ -318,7 +318,7 @@ func (ap *apiplex) upstreamRequest(req *http.Request, ctx *APIContext) (*http.Re
 func (ap *apiplex) HandleAPI(res http.ResponseWriter, req *http.Request) {
 	defer func() {
 		if err := recover(); err != nil {
-			ap.reportError(err)
+			ap.reportError(err.(error))
 		}
 	}()
 
