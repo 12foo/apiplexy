@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"github.com/12foo/apiplexy"
 	"net/http"
-	"net/url"
 	"strings"
 	"time"
 
@@ -65,21 +64,25 @@ func (ix *InfluxDBLoggingPlugin) Configure(config map[string]interface{}) error 
 	if len(ix.measurement) == 0 {
 		return fmt.Errorf("Measurement name cannot be an empty string.")
 	}
-	u, _ := url.Parse(config["server"].(string))
+	u := config["server"].(string)
 	rawtags := strings.Split(config["tags"].(string), ",")
 	ix.tags = make(map[string]bool, len(rawtags))
 	for _, tag := range rawtags {
 		ix.tags[strings.TrimSpace(tag)] = true
 	}
 
-	cfg := client.Config{
-		URL: u,
+	cfg := client.HTTPConfig{
+		Addr: u,
 	}
 	if _, ok := config["username"]; ok {
 		cfg.Username = config["username"].(string)
 		cfg.Password = config["password"].(string)
 	}
-	ix.client = client.NewClient(cfg)
+	c, err := client.NewHTTPClient(cfg)
+	if err != nil {
+		return err
+	}
+	ix.client = c
 
 	ix.batchConfig = client.BatchPointsConfig{
 		Database:  config["database"].(string),
