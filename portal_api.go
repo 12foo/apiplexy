@@ -6,7 +6,7 @@ import (
 	"github.com/dchest/uniuri"
 	"github.com/dgrijalva/jwt-go"
 	"github.com/garyburd/redigo/redis"
-	"github.com/labstack/echo"
+	"gopkg.in/labstack/echo.v1"
 	"net/http"
 	"strings"
 	"time"

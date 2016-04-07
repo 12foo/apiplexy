@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"github.com/dchest/uniuri"
 	"github.com/garyburd/redigo/redis"
-	"github.com/labstack/echo"
+	"gopkg.in/labstack/echo.v1"
 	"log"
 	"net/http"
 	"net/url"

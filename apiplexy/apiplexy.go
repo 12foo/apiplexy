@@ -12,15 +12,12 @@ import (
 	"fmt"
 	"github.com/12foo/apiplexy"
 	"github.com/codegangsta/cli"
-	"github.com/kardianos/osext"
 	"github.com/skratchdot/open-golang/open"
 	"gopkg.in/yaml.v2"
 	"io/ioutil"
 	"net"
 	"net/http"
 	"os"
-	"os/exec"
-	"os/signal"
 	"sort"
 	"strconv"
 	"syscall"
@@ -28,7 +25,6 @@ import (
 	"time"
 )
 
-var listen *graceListener
 var configPath string
 var pidfile string
 
@@ -127,9 +123,6 @@ func check(c *cli.Context) {
 }
 
 func start(c *cli.Context) {
-	if pidfile == "" {
-		pidfile = c.String("pidfile")
-	}
 	if pidfile != "" {
 		pid, err := fileOrPid(pidfile)
 		if err != nil {
@@ -137,7 +130,7 @@ func start(c *cli.Context) {
 			os.Exit(1)
 		}
 		if pid != 0 && pid != syscall.Getppid() {
-			fmt.Fprintf(os.Stderr, "There is already a pidfile at '%s' that appears to belong to another apiplexy instance.\nDid you mean to use 'apiplexy restart'? Alternatively, if you know what you're doing, delete the file and try again.")
+			fmt.Fprintf(os.Stderr, "There is already a pidfile at '%s' that appears to belong to another apiplexy instance.")
 			os.Exit(1)
 		}
 	}
@@ -160,49 +153,16 @@ func start(c *cli.Context) {
 		MaxHeaderBytes: 1 << 16,
 	}
 
-	if c.Bool("g") == false {
-		// parent
-		fmt.Printf("Launching apiplexy on port %d.\n", config.Serve.Port)
-		l, err := net.Listen("tcp", server.Addr)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "Couldn't start server on %s: %s\n", server.Addr, err.Error())
-			os.Exit(1)
-		}
-		listen = newGraceListener(l)
-	} else {
-		// child
-		fmt.Printf("Gracefully restarting apiplexy on port %d.\n", config.Serve.Port)
-		f := os.NewFile(3, "")
-		l, err := net.FileListener(f)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "Couldn't inherit server port from parent: \n", err.Error())
-			os.Exit(1)
-		}
-		listen = newGraceListener(l)
-		// wait for parent to finish requests
-		parent := syscall.Getppid()
-		syscall.Kill(parent, syscall.SIGTERM)
+	fmt.Printf("Launching apiplexy on port %d.\n", config.Serve.Port)
+	l, err := net.Listen("tcp", server.Addr)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Couldn't start server on %s: %s\n", server.Addr, err.Error())
+		os.Exit(1)
 	}
 
 	// write pidfile and wait for restart signal
 	if pidfile != "" {
 		ioutil.WriteFile(pidfile, []byte(strconv.Itoa(syscall.Getpid())), 0600)
-		sigusr := make(chan os.Signal, 1)
-		sigkill := make(chan os.Signal, 1)
-		signal.Notify(sigusr, syscall.SIGUSR1)
-		signal.Notify(sigkill, syscall.SIGINT)
-		go func() {
-			for {
-				select {
-				case _ = <-sigusr:
-					if err := performRestart(); err != nil {
-						fmt.Print(err.Error())
-					}
-				case _ = <-sigkill:
-					break
-				}
-			}
-		}()
 	}
 
 	defer func() {
@@ -214,35 +174,9 @@ func start(c *cli.Context) {
 				os.Remove(pidfile)
 			}
 		}
-		fmt.Println("Previous apiplexy process has shut down.")
 	}()
 
-	server.Serve(listen)
-}
-
-func performRestart() error {
-	executable, err := osext.Executable()
-	if err != nil {
-		return fmt.Errorf("Could not determine executable path for graceful restart.")
-	}
-
-	// first, check the (possibly new) configuration using the (possibly new) executable
-	checkresult, err := exec.Command(executable, "check", "-c", configPath).Output()
-	if err != nil {
-		return fmt.Errorf(string(checkresult))
-	}
-
-	// then, spawn a child and hand over
-	file, err := listen.Listener.(*net.TCPListener).File()
-	if err != nil {
-		return fmt.Errorf("Could not get TCP listener descriptor for graceful restart.")
-	}
-	cmd := exec.Command(executable, "start", "-g", "-c", configPath, "-p", pidfile)
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	cmd.ExtraFiles = []*os.File{file}
-	err = cmd.Start()
-	return err
+	server.Serve(l)
 }
 
 func main() {
