@@ -45,8 +45,11 @@ func (auth *HMACAuthPlugin) Detect(req *http.Request, ctx *apiplexy.APIContext) 
 	sig := make(map[string]interface{}, len(sigParts))
 	for _, part := range sigParts {
 		p := strings.SplitN(part, "=", 2)
-		p[1] = strings.TrimLeft(p[1], "\" ")
-		p[1] = strings.TrimRight(p[1], "\" ")
+		if len(p) != 2 {
+			return "", "", nil, nil
+		}
+		p[0] = strings.Trim(p[0], "\" ")
+		p[1] = strings.Trim(p[1], "\" ")
 		sig[p[0]] = p[1]
 	}
 	if sig["keyId"] == nil || sig["signature"] == nil {

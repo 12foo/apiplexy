@@ -141,6 +141,9 @@ func (ap *apiplex) authenticateRequest(req *http.Request, rd redis.Conn, ctx *AP
 				}
 			}
 		}
+		if found {
+			break
+		}
 	}
 	if !found {
 		if ap.allowKeyless {
@@ -422,6 +425,11 @@ func (ap *apiplex) HandleAPI(res http.ResponseWriter, req *http.Request) {
 		return
 	}
 
+	if ctx.Key == nil {
+		res.Header().Set("X-Auth-Type", "No Key")
+	} else {
+		res.Header().Set("X-Auth-Type", ctx.Key.Type)
+	}
 	res.WriteHeader(urs.StatusCode)
 	res.Write(body)
 
